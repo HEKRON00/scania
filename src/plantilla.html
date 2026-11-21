@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d0f13">
+<meta name="description" content="Escáner OBD2 con diagnóstico por evidencia e inteligencia artificial. Funciona con adaptadores ELM327 Bluetooth.">
+<title>ScanIA · Diagnóstico OBD2</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%230d0f13'/%3E%3Cpath d='M8 30v-8h4l3-5h11l3 3h5v-3h4v6h3v-3h3v13h-3v-3h-3v5h-6l-3 3H16l-3-3H8z' fill='%23f5a524'/%3E%3C/svg%3E">
+<style>
+/*CSS*/
+</style>
+</head>
+<body>
+<div class="banda-sim oculto" id="banda-sim">MODO SIMULADOR · datos de prueba, no es un carro real</div>
+<header class="barra">
+  <div class="marca">
+    <svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><path d="M8 30v-8h4l3-5h11l3 3h5v-3h4v6h3v-3h3v13h-3v-3h-3v5h-6l-3 3H16l-3-3H8z" fill="currentColor"/></svg>
+    <div><h1>ScanIA</h1><p id="carro-barra">Sin carro elegido</p></div>
+  </div>
+  <div class="barra-der">
+    <button class="btn chico oculto" id="btn-instalar">Instalar app</button>
+    <button class="btn-icono" id="btn-ajustes" title="Ajustes" aria-label="Ajustes">⚙</button>
+    <div class="estado-conexion" id="pill-conexion" role="status"><span class="punto"></span><span id="texto-conexion">Desconectado</span></div>
+  </div>
+</header>
+
+<nav class="navegacion" id="nav">
+  <button data-vista="inicio" class="activa"><span class="ic">◉</span><span>Inicio</span></button>
+  <button data-vista="escanear"><span class="ic">⌁</span><span>Escanear</span></button>
+  <button data-vista="vivo"><span class="ic">〰</span><span>En vivo</span></button>
+  <button data-vista="pruebas"><span class="ic">✓</span><span>Pruebas</span></button>
+  <button data-vista="ia"><span class="ic">✦</span><span>IA</span></button>
+  <button data-vista="carros"><span class="ic">▣</span><span>Carros</span></button>
+  <button data-vista="mas"><span class="ic">⋯</span><span>Más</span></button>
+</nav>
+
+<main>
+<!-- ================= INICIO ================= -->
+<section class="vista activa" data-vista="inicio">
+  <div class="rejilla">
+    <div class="tarjeta col-7" id="inicio-estado"></div>
+    <div class="tarjeta col-5" id="inicio-carro"></div>
+    <div class="tarjeta col-7" id="inicio-alertas"></div>
+    <div class="tarjeta col-5" id="inicio-mantenimiento"></div>
+  </div>
+</section>
+
+<!-- ================= ESCANEAR ================= -->
+<section class="vista" data-vista="escanear">
+  <div class="rejilla">
+    <div class="tarjeta col-4" id="tarjeta-conexion">
+      <h2>Conexión</h2>
+      <div class="pestanas" role="tablist">
+        <button class="pestana activa" data-modo="bluetooth">Adaptador OBD2</button>
+        <button class="pestana" data-modo="simulador">Simulador</button>
+      </div>
+      <div class="panel-modo" data-panel="bluetooth">
+        <ol class="pasos">
+          <li>Conectá el adaptador al puerto OBD2 (debajo del timón) y poné la llave en <strong>ON</strong> o encendé el motor.</li>
+          <li><strong>Solo la primera vez:</strong> emparejalo en los ajustes de Bluetooth (se llama “OBDII” o parecido; PIN <strong>1234</strong> o <strong>0000</strong>).</li>
+          <li>Tocá <strong>Conectar</strong> y elegilo de la lista.</li>
+        </ol>
+        <div class="aviso-compat oculto" id="aviso-compat"></div>
+        <div class="acciones">
+          <button class="btn primario grande" id="btn-conectar-bt">Conectar adaptador</button>
+          <button class="btn oculto" id="btn-conectar-recordado">Usar el adaptador de siempre</button>
+        </div>
+        <button class="enlace" id="btn-conectar-ble">¿Tu adaptador es Bluetooth 4.0 / BLE? Conectar por BLE</button>
+      </div>
+      <div class="panel-modo oculto" data-panel="simulador">
+        <label>Situación a simular <select id="sel-escenario"></select></label>
+        <p class="nota" id="desc-escenario"></p>
+        <div class="acciones"><button class="btn primario grande" id="btn-conectar-sim">Conectar simulador</button></div>
+      </div>
+      <div class="acciones">
+        <button class="btn oculto" id="btn-reconectar">Reconectar</button>
+        <button class="btn" id="btn-desconectar" disabled>Desconectar</button>
+      </div>
+      <p class="mensaje" id="msg-conexion" role="status"></p>
+      <dl class="info-vehiculo" id="info-obd"></dl>
+    </div>
+
+    <div class="tarjeta col-8" id="tarjeta-codigos">
+      <div class="cabecera">
+        <h2>Check engine y códigos</h2>
+        <div class="acciones">
+          <button class="btn primario" id="btn-revision" disabled title="Lee códigos, freeze frame, monitores y pruebas internas, y guarda el escaneo">Revisión completa</button>
+          <button class="btn" id="btn-leer" disabled>Solo códigos</button>
+          <button class="btn peligro" id="btn-borrar" disabled>Borrar códigos</button>
+        </div>
+      </div>
+      <div class="mil-fila">
+        <div class="mil" id="mil" title="Luz check engine"><svg viewBox="0 0 64 40" aria-hidden="true"><path d="M6 24v-9h5l4-6h16l4 4h8V9h5v9h5v-4h5v18h-5v-4h-5v7h-9l-4 4H18l-4-4H6z" fill="currentColor"/></svg></div>
+        <div><div class="mil-texto" id="mil-texto">Sin leer</div><div class="nota" id="mil-detalle">Conectate y tocá “Revisión completa”.</div></div>
+      </div>
+      <div id="lista-codigos" class="lista-codigos"></div>
+      <div class="dos-col"><div id="freeze-frame"></div><div id="monitores"></div></div>
+      <div id="extras-lectura"></div>
+    </div>
+
+    <div class="tarjeta col-12">
+      <div class="cabecera">
+        <h2>Diagnóstico local <span class="etiqueta">sin internet</span></h2>
+        <button class="btn" id="btn-analizar">Actualizar</button>
+      </div>
+      <p class="nota" id="analisis-info">Relaciona códigos, freeze frame, datos en vivo y pruebas internas. Cada hallazgo dice qué tan seguro es y cómo confirmarlo.</p>
+      <div id="hallazgos" class="hallazgos"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= EN VIVO ================= -->
+<section class="vista" data-vista="vivo">
+  <div class="rejilla">
+    <div class="tarjeta col-12">
+      <div class="cabecera">
+        <h2>Datos en vivo</h2>
+        <div class="acciones">
+          <button class="btn primario" id="btn-tablero">Modo tablero</button>
+          <button class="btn" id="btn-csv">Exportar CSV</button>
+          <button class="btn" id="btn-limpiar-vivo">Limpiar</button>
+        </div>
+      </div>
+      <p class="nota" id="vivo-estado">Sin conexión</p>
+      <div class="tiles" id="tiles"></div>
+      <p class="nota">Tocá un dato para ver su gráfica grande. Debajo de cada valor: de dónde sale (PID) y hace cuánto se leyó.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PRUEBAS ================= -->
+<section class="vista" data-vista="pruebas">
+  <div class="rejilla">
+    <div class="tarjeta col-12">
+      <h2>Pruebas guiadas</h2>
+      <p class="nota">La app te dice qué hacer y mide sola. Nunca uses el teléfono mientras manejás.</p>
+      <div class="lista-pruebas" id="lista-pruebas"></div>
+    </div>
+    <div class="tarjeta col-7">
+      <div class="cabecera"><h2>Pruebas internas de la computadora (modo 06)</h2><button class="btn" id="btn-modo06" disabled>Leer</button></div>
+      <p class="nota">Resultados de las pruebas que el carro se hace solo. Pueden mostrar fallas antes de que se encienda la luz.</p>
+      <div id="modo06"></div>
+    </div>
+    <div class="tarjeta col-5">
+      <h2>Revisión de carro usado</h2>
+      <p class="nota">Revisa códigos, permanentes, monitores, señales de borrado, VIN y kilometraje. Copiá el VIN de la placa del parabrisas o de la puerta.</p>
+      <label>VIN del carro (parabrisas o puerta) <input id="u-vin" maxlength="17" autocomplete="off" spellcheck="false" placeholder="17 caracteres"></label>
+      <div class="form-carro dos">
+        <label>Año que dice el vendedor <input id="u-anio" inputmode="numeric" placeholder="2014"></label>
+        <label>Km del tablero <input id="u-km" inputmode="numeric" placeholder="120000"></label>
+      </div>
+      <div class="acciones"><button class="btn primario" id="btn-usado" disabled>Hacer revisión</button></div>
+      <div id="usado"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= IA ================= -->
+<section class="vista" data-vista="ia">
+  <div class="rejilla">
+    <div class="tarjeta col-12" id="tarjeta-ia">
+      <h2>Diagnóstico con IA</h2>
+      <div id="ia-carro" class="ia-carro"></div>
+      <label>Síntomas (lo que sentís, oís u olés; cuándo pasa)
+        <div class="con-mic"><textarea id="sintomas" rows="3" placeholder="Ej: tiembla en ralentí cuando está caliente, huele a gasolina, la luz parpadea al subir cuestas..."></textarea>
+          <button class="btn-icono mic oculto" data-mic="sintomas" title="Dictar">🎤</button></div>
+      </label>
+      <div class="fotos">
+        <label class="btn chico">Agregar fotos<input type="file" id="fotos" accept="image/*" multiple hidden></label>
+        <span class="nota">Testigos del tablero, fugas, mangueras, piezas (máx. 4)</span>
+        <div class="miniaturas" id="miniaturas"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="ia-buscar"> Buscar en internet fallas conocidas y boletines de este modelo (cuesta un poco más)</label>
+      <div class="acciones">
+        <button class="btn primario grande" id="btn-ia">Diagnosticar con IA</button>
+        <span class="nota" id="ia-estado"></span>
+      </div>
+      <div id="resultado-ia"></div>
+      <div id="chat" class="chat oculto">
+        <h3>Seguimiento</h3>
+        <p class="nota">Contale a la IA los resultados de las pruebas. Si estás conectado, se le mandan los datos actualizados del carro.</p>
+        <div id="chat-mensajes" class="chat-mensajes"></div>
+        <div class="sugerencias" id="sugerencias"></div>
+        <form id="chat-form" class="chat-form">
+          <div class="con-mic"><textarea id="chat-texto" rows="2" placeholder="Ej: Cambié la bobina del cilindro 2 al 3 y ahora los fallos salen en el 3..."></textarea>
+            <button class="btn-icono mic oculto" type="button" data-mic="chat-texto" title="Dictar">🎤</button></div>
+          <label class="btn-icono" title="Agregar foto">📷<input type="file" id="chat-foto" accept="image/*" hidden></label>
+          <button class="btn primario" type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CARROS ================= -->
+<section class="vista" data-vista="carros">
+  <div class="rejilla">
+    <div class="tarjeta col-12">
+      <div class="cabecera"><h2>Mis carros</h2><button class="btn primario" id="btn-nuevo-carro">Agregar carro</button></div>
+      <div id="lista-carros" class="lista-carros"></div>
+    </div>
+    <div class="tarjeta col-12" id="detalle-carro"></div>
+  </div>
+</section>
+
+<!-- ================= MÁS ================= -->
+<section class="vista" data-vista="mas">
+  <div class="rejilla">
+    <div class="tarjeta col-6">
+      <h2>Buscar un código</h2>
+      <div class="fila"><input id="buscar-codigo" placeholder="P0171" maxlength="5" autocomplete="off"><button class="btn primario" id="btn-buscar-codigo">Buscar</button></div>
+      <div id="resultado-codigo"></div>
+    </div>
+    <div class="tarjeta col-6">
+      <h2>Respaldo</h2>
+      <p class="nota">Todo (carros, mantenimiento, escaneos y diagnósticos) se guarda solo en este dispositivo. Hacé un respaldo de vez en cuando.</p>
+      <label class="check"><input type="checkbox" id="resp-codigo"> Incluir el código familiar del servidor de IA</label>
+      <div class="acciones">
+        <button class="btn primario" id="btn-exportar">Descargar respaldo (JSON)</button>
+        <label class="btn">Restaurar respaldo<input type="file" id="importar" accept="application/json,.json" hidden></label>
+      </div>
+      <p class="mensaje" id="msg-respaldo"></p>
+    </div>
+    <div class="tarjeta col-6">
+      <div class="cabecera"><h2>Registro técnico</h2>
+        <div class="acciones"><button class="btn" id="btn-copiar-log">Copiar</button><button class="btn" id="btn-bajar-log">Descargar</button></div></div>
+      <p class="nota">Todo lo que se habló con el adaptador. Si algo falla, mandá este registro.</p>
+      <pre class="registro" id="registro">Sin conexión todavía.</pre>
+    </div>
+    <div class="tarjeta col-6">
+      <h2>Qué se puede leer de cada marca</h2>
+      <select id="sel-marca"></select>
+      <div id="capacidades"></div>
+    </div>
+    <div class="tarjeta col-12">
+      <h2>Acerca de ScanIA</h2>
+      <p class="nota" id="acerca"></p>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="pie">ScanIA te orienta, pero no reemplaza la revisión física de un mecánico. Confirmá siempre antes de cambiar piezas. Nunca uses el teléfono mientras manejás.</footer>
+
+<!-- ================= MODALES ================= -->
+<div class="modal oculto" id="modal-ajustes" role="dialog" aria-modal="true" aria-labelledby="titulo-ajustes">
+  <div class="modal-caja">
+    <h2 id="titulo-ajustes">Ajustes</h2>
+    <h3>Servidor de IA</h3>
+    <p class="nota">La clave de Anthropic NO se guarda en el teléfono: vive en tu servidor (ver <em>servidor/LEEME.md</em>). Aquí solo va la dirección y el código familiar.</p>
+    <label>Dirección del servidor <input id="aj-servidor" placeholder="https://scania-ia.tu-cuenta.workers.dev" autocomplete="off" spellcheck="false"></label>
+    <label>Código familiar
+      <div class="fila"><input id="aj-codigo" type="password" autocomplete="off" spellcheck="false"><button class="btn-icono" id="aj-ver" type="button" title="Mostrar u ocultar">👁</button></div>
+    </label>
+    <div class="acciones"><button class="btn" id="aj-probar">Probar conexión</button><span class="nota" id="aj-prueba"></span></div>
+    <label>Modelo de IA <select id="aj-modelo"></select></label>
+    <label class="check"><input type="checkbox" id="aj-buscar"> Buscar fallas conocidas en internet por defecto</label>
+    <h3>Unidades</h3>
+    <div class="form-carro" id="aj-unidades"></div>
+    <h3>Privacidad</h3>
+    <label class="check"><input type="checkbox" id="aj-vin-ia"> Enviar el VIN a la IA (si no, solo se manda marca, modelo, año y motor)</label>
+    <label class="check"><input type="checkbox" id="aj-vin-nhtsa"> Permitir decodificar el VIN con la base pública de la NHTSA (se envía el VIN a internet)</label>
+    <h3>Pantalla y adaptador</h3>
+    <label class="check"><input type="checkbox" id="aj-pantalla"> Mantener la pantalla encendida mientras está conectado</label>
+    <label class="check"><input type="checkbox" id="aj-voz"> Alertas por voz en el modo tablero</label>
+    <label>Velocidad del adaptador (solo USB) <select id="aj-baud"><option>38400</option><option>9600</option><option>115200</option><option>230400</option><option>500000</option></select></label>
+    <div class="acciones">
+      <button class="btn primario" id="aj-guardar">Guardar</button>
+      <button class="btn" id="aj-cerrar">Cerrar</button>
+    </div>
+    <p class="mensaje" id="aj-msg"></p>
+  </div>
+</div>
+
+<div class="modal oculto" id="modal" role="dialog" aria-modal="true"><div class="modal-caja" id="modal-caja"></div></div>
+
+<div class="reporte oculto" id="reporte">
+  <div class="reporte-barra">
+    <button class="btn" id="rep-json">Descargar JSON</button>
+    <button class="btn primario" id="rep-imprimir">Imprimir / Guardar PDF</button>
+    <button class="btn" id="rep-cerrar">Cerrar</button>
+  </div>
+  <div class="reporte-hoja" id="reporte-hoja"></div>
+</div>
+
+<div class="tablero oculto" id="tablero">
+  <div class="tablero-barra"><span id="tablero-estado">Modo tablero</span><button class="btn" id="tablero-salir">Salir</button></div>
+  <div class="tablero-medidores" id="tablero-medidores"></div>
+  <div class="tablero-alertas" id="tablero-alertas"></div>
+  <p class="tablero-aviso">No toqués el teléfono mientras manejás. Las alertas importantes se anuncian por voz.</p>
+</div>
+
+<div class="toast oculto" id="toast" role="status"></div>
+
+<script>
+/*JS*/
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "scania",
+  "version": "2.0.0",
+  "private": true,
+  "description": "ScanIA: escáner OBD2 (ELM327) con diagnóstico por evidencia e IA opcional. Web app sin dependencias.",
+  "scripts": {
+    "build": "python3 construir.py",
+    "test": "node --test \"tests/*.test.*\"",
+    "e2e": "python3 construir.py && python3 tests/e2e.py"
+  },
+  "engines": { "node": ">=20" }
+}

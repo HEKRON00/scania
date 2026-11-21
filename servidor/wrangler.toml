@@ -1,0 +1,15 @@
+# Configuración del servidor de IA de ScanIA (Cloudflare Workers)
+# Despliegue: npx wrangler deploy   (ver servidor/LEEME.md)
+name = "scania-ia"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+# Sitio donde está publicada la app. Agregá ",null" si abrís ScanIA.html como archivo.
+ORIGENES = "https://hekron00.github.io"
+LIMITE_POR_MINUTO = "8"
+LIMITE_POR_DIA = "120"
+
+# Los secretos NO van aquí. Se cargan con:
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put CODIGO_FAMILIAR

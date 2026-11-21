@@ -1,0 +1,193 @@
+"""Prueba de punta a punta de la interfaz con Chrome sin pantalla y el simulador.
+Uso: python3 tests/e2e.py  (sirve la app construida en http://127.0.0.1:8765)"""
+import asyncio, json, os, subprocess, sys, time
+from playwright.async_api import async_playwright
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB = RAIZ
+SALIDA = os.path.join(RAIZ, "tests", "capturas")
+os.makedirs(SALIDA, exist_ok=True)
+fallas = []
+
+def ok(cond, texto):
+    print(("  OK  " if cond else "  FALLA ") + texto)
+    if not cond: fallas.append(texto)
+
+async def conectar_sim(pg, escenario):
+    await pg.click('#nav button[data-vista="escanear"]')
+    if await pg.is_enabled("#btn-desconectar"): await pg.click("#btn-desconectar")
+    if not await pg.is_visible('.pestana[data-modo="simulador"]'):
+        print("ESTADO:", await pg.evaluate("[location.hash, [...document.querySelectorAll('.vista.activa')].map(v=>v.dataset.vista), document.querySelector('#modal').className, document.querySelector('#modal-ajustes').className, document.querySelector('#reporte').className, document.querySelector('#tablero').className]"))
+        await pg.screenshot(path=os.path.join(SALIDA, "error.png"))
+    await pg.click('.pestana[data-modo="simulador"]')
+    await pg.select_option("#sel-escenario", escenario)
+    await pg.click("#btn-conectar-sim")
+    await pg.wait_for_function("document.querySelector('#texto-conexion').textContent.startsWith('Simulador')", timeout=30000)
+    await pg.wait_for_function("!document.querySelector('#btn-revision').classList.contains('cargando')", timeout=60000)
+
+async def correr_prueba(pg, id, acepto=False, timeout=60000):
+    await pg.click('#nav button[data-vista="pruebas"]')
+    await pg.click(f'[data-prueba="{id}"]')
+    if acepto: await pg.check("#pg-acepto")
+    await pg.click("#pg-empezar")
+    t0 = time.time()
+    while time.time() - t0 < timeout / 1000:
+        botones = await pg.query_selector_all("#pg-accion button")
+        for b in botones: await b.click()
+        if await pg.query_selector("#pg-cuerpo .resultado-g"): break
+        await pg.wait_for_timeout(300)
+    r = await pg.eval_on_selector("#pg-cuerpo", "e => e.innerText")
+    await pg.click("#pg-cancelar")
+    return r
+
+async def main():
+    srv = subprocess.Popen([sys.executable, "-m", "http.server", "8765", "--bind", "127.0.0.1"], cwd=WEB, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.8)
+    try:
+        async with async_playwright() as p:
+            b = await p.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--no-sandbox"])
+            ctx = await b.new_context(viewport={"width": 1280, "height": 900}, accept_downloads=True)
+            pg = await ctx.new_page()
+            errores = []
+            pg.on("pageerror", lambda e: errores.append(str(e)))
+            pg.on("console", lambda m: errores.append(m.text) if m.type == "error" else None)
+            await pg.goto("http://127.0.0.1:8765/")
+            await pg.wait_for_timeout(800)
+            ok(await pg.title() == "ScanIA · Diagnóstico OBD2", "carga la página")
+            ok(not errores, f"sin errores de JavaScript al cargar {errores}")
+
+            print("Simulador: misfire en cilindro 2")
+            await conectar_sim(pg, "misfire_cil2")
+            ok(await pg.is_visible("#banda-sim"), "banda de SIMULADOR visible")
+            cods = await pg.eval_on_selector_all("#lista-codigos .num", "e => e.map(x => x.textContent)")
+            ok("P0302" in cods, f"lee P0302 ({cods})")
+            ok(await pg.eval_on_selector_all("#lista-codigos .chip", "e => e.some(x => x.textContent === 'Motor')"), "muestra el módulo que reporta el código")
+            await pg.wait_for_timeout(6000)
+            await pg.click("#btn-analizar")
+            hall = await pg.eval_on_selector_all("#hallazgos .hallazgo .titulo", "e => e.map(x => x.innerText)")
+            ok(any("cilindro 2" in h.lower() for h in hall), f"hallazgo del cilindro 2 ({hall[:3]})")
+            ok(await pg.eval_on_selector_all("#hallazgos .chip.confirmada, #hallazgos .chip.sospecha, #hallazgos .chip.posibilidad", "e => e.length") > 0, "hallazgos con nivel de certeza")
+            await pg.click('#nav button[data-vista="vivo"]')
+            await pg.wait_for_timeout(1500)
+            n = await pg.eval_on_selector_all("#tiles .tile", "e => e.length")
+            ok(n >= 10, f"{n} datos en vivo")
+            meta = await pg.eval_on_selector("#tiles .tile .meta-dato", "e => e.textContent")
+            ok("PID" in meta or "01" in meta or "hace" in meta, f"cada dato dice fuente y edad ({meta})")
+            await pg.screenshot(path=os.path.join(SALIDA, "vivo.png"), full_page=True)
+
+            await pg.click('#nav button[data-vista="pruebas"]')
+            await pg.click("#btn-modo06")
+            await pg.wait_for_selector("#modo06 .barras-cil", timeout=20000)
+            barras = await pg.eval_on_selector_all("#modo06 .barra-cil", "e => e.map(x => x.innerText.replace(/\\s+/g,' '))")
+            ok(any(b.startswith("Cil 2 ") and "41" in b for b in barras), f"modo 06: cilindro 2 con 41 fallos ({barras})")
+
+            r = await correr_prueba(pg, "misfire")
+            ok("cilindro 2" in r.lower(), f"prueba guiada de misfire: {r.splitlines()[0]}")
+            r = await correr_prueba(pg, "bateria")
+            ok(r.startswith("Bien") or r.startswith("Regular") or r.startswith("Mal"), f"prueba de batería: {r.splitlines()[0]}")
+            await pg.screenshot(path=os.path.join(SALIDA, "pruebas.png"), full_page=True)
+
+            print("Borrar códigos (con confirmación y escaneo guardado)")
+            await pg.click('#nav button[data-vista="escanear"]')
+            await pg.click("#btn-borrar")
+            ok(await pg.is_disabled("#si-borrar"), "botón de borrar bloqueado hasta confirmar")
+            texto = await pg.eval_on_selector("#modal-caja", "e => e.innerText")
+            ok("monitores" in texto.lower() and "freeze frame" in texto.lower(), "explica que se pierden datos y se reinician monitores")
+            await pg.check("#conf-borrar"); await pg.click("#si-borrar")
+            await pg.wait_for_function("document.querySelector('#mil-detalle').textContent.includes('borrados')", timeout=20000)
+            esc = await pg.evaluate("ScanIA.almacen.escaneos().map(e => e.origen)")
+            ok("antes_de_borrar" in esc, f"se guardó el escaneo antes de borrar ({esc})")
+
+            print("Mis carros y respaldo")
+            await pg.click("#btn-desconectar")
+            await pg.click('#nav button[data-vista="carros"]')
+            await pg.click("#btn-nuevo-carro")
+            await pg.fill('[data-campo="apodo"]', "Corolla de mamá")
+            await pg.fill('[data-campo="marca"]', "Toyota"); await pg.fill('[data-campo="modelo"]', "Corolla")
+            await pg.fill('[data-campo="anio"]', "2012"); await pg.fill('[data-campo="cilindrada"]', "1.8"); await pg.fill('[data-campo="km"]', "154000")
+            await pg.fill('[data-campo="vin"]', "1HGCM82633A004352")
+            ok("correcto" in (await pg.text_content("#fc-vin-msg")), "valida el dígito verificador del VIN")
+            await pg.click("#fc-guardar")
+            ok("Corolla de mamá" in await pg.text_content("#lista-carros"), "carro guardado")
+            await pg.click('[data-mant="0"]'); await pg.fill("#rm-km", "150000"); await pg.click("#rm-guardar")
+            ok("Cambio de aceite" in await pg.text_content("#detalle-carro"), "mantenimiento registrado")
+            await pg.screenshot(path=os.path.join(SALIDA, "carros.png"), full_page=True)
+            await pg.click('#nav button[data-vista="mas"]')
+            async with pg.expect_download() as d:
+                await pg.click("#btn-exportar")
+            dl = await d.value
+            datos = json.load(open(await dl.path()))
+            ok(datos["app"] == "ScanIA" and len(datos["carros"]) == 1 and "codigo" not in datos["ajustes"], "respaldo descargado sin el código familiar")
+            ok("clave" not in json.dumps(datos["ajustes"]), "el respaldo no tiene claves")
+
+            print("Unidades y ajustes")
+            await pg.click("#btn-ajustes")
+            await pg.select_option('[data-unidad="temperatura"]', "F")
+            await pg.fill("#aj-servidor", "http://inseguro.com")
+            await pg.click("#aj-guardar")
+            ok("https" in await pg.text_content("#aj-msg"), "rechaza servidor sin https")
+            await pg.fill("#aj-servidor", "")
+            await pg.click("#aj-guardar")
+            await conectar_sim(pg, "sobrecalentamiento")
+            await pg.click('#nav button[data-vista="vivo"]'); await pg.wait_for_timeout(1500)
+            u = await pg.eval_on_selector('.tile[data-clave="temp_motor"] .unidad', "e => e.textContent")
+            ok(u == "°F", f"temperatura en °F ({u})")
+            await pg.click("#btn-tablero")
+            try: await pg.wait_for_function("document.querySelector('#tablero-alertas').textContent.includes('caliente')", timeout=90000)
+            except Exception: pass
+            al = await pg.text_content("#tablero-alertas")
+            ok("caliente" in al.lower(), f"modo tablero alerta sobrecalentamiento ({al})")
+            await pg.screenshot(path=os.path.join(SALIDA, "tablero.png"))
+            await pg.click("#tablero-salir")
+
+            print("Revisión de usado y reporte")
+            await pg.click('#nav button[data-vista="pruebas"]')
+            await pg.fill("#u-vin", "9SCANA0SMVL000001"); await pg.fill("#u-km", "87000")
+            await pg.click("#btn-usado")
+            await pg.wait_for_selector("#usado .punto-u", timeout=60000)
+            puntos = await pg.eval_on_selector_all("#usado .punto-u", "e => e.length")
+            ok(puntos >= 5, f"revisión de usado con {puntos} puntos")
+            await pg.click("#u-reporte")
+            ok(await pg.is_visible("#reporte-hoja"), "reporte imprimible abierto")
+            ok("SIMULADOR" in await pg.text_content("#reporte-hoja"), "el reporte marca que es simulador")
+            await pg.click("#rep-cerrar")
+
+            print("Fallas del adaptador")
+            await conectar_sim(pg, "respuestas_incompletas")
+            ok("Simulador" in await pg.text_content("#texto-conexion"), "conecta pese a respuestas incompletas")
+            await pg.click("#btn-desconectar")
+            await pg.click('#nav button[data-vista="escanear"]')
+            await pg.click('.pestana[data-modo="simulador"]')
+            await pg.select_option("#sel-escenario", "sin_carro")
+            await pg.click("#btn-conectar-sim")
+            await pg.wait_for_function("!document.querySelector('#btn-conectar-sim').classList.contains('cargando')", timeout=60000)
+            msg = await pg.text_content("#msg-conexion")
+            ok("Desconectado" in await pg.text_content("#texto-conexion"), f"sin carro: no declara conectado ({msg})")
+
+            print("IA sin servidor")
+            await pg.click('#nav button[data-vista="ia"]')
+            ok(await pg.is_disabled("#btn-ia"), "el botón de IA pide configurar el servidor")
+            claves = await pg.evaluate("JSON.stringify(localStorage)")
+            ok("sk-ant" not in claves, "no hay claves de Anthropic en el almacenamiento")
+
+            print("Celular")
+            m = await b.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
+            pm = await m.new_page()
+            pm.on("pageerror", lambda e: errores.append(str(e)))
+            await pm.goto("http://127.0.0.1:8765/")
+            await pm.wait_for_timeout(800)
+            await pm.screenshot(path=os.path.join(SALIDA, "celular_inicio.png"))
+            await conectar_sim(pm, "fuga_vacio")
+            await pm.wait_for_timeout(5000)
+            await pm.click("#btn-analizar")
+            await pm.screenshot(path=os.path.join(SALIDA, "celular_escanear.png"), full_page=True)
+            ancho = await pm.evaluate("document.documentElement.scrollWidth")
+            ok(ancho <= 392, f"sin desbordamiento horizontal en celular ({ancho}px)")
+            ok(not errores, f"sin errores de JavaScript durante la prueba {errores[:5]}")
+            await b.close()
+    finally:
+        srv.terminate()
+    print(f"\n{'TODO BIEN' if not fallas else str(len(fallas)) + ' FALLA(S)'}")
+    sys.exit(1 if fallas else 0)
+
+asyncio.run(main())

@@ -1,0 +1,13 @@
+# Nunca subir secretos
+.env
+.env.*
+.dev.vars
+*.pem
+*.key
+servidor/.wrangler/
+# Generados localmente
+tests/capturas/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
