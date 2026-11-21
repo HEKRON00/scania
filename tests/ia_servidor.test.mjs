@@ -179,3 +179,36 @@ test("servidor: reenvía a Anthropic con la clave del entorno y limita las consu
     assert.equal((await worker.fetch(pedido("/v1/mensajes", { cuerpo: { model: "x" } }), ENV)).status, 400);
   } finally { globalThis.fetch = original; }
 });
+
+// ------------------------------------------------------------------ regresiones 2.1
+test("A-25 · respuesta cortada por límite de tokens se marca como incompleta", async () => {
+  await conFetch(async () => responder(200, { content: [{ type: "text", text: '{"resumen":"Hay fallos en el cil' }], stop_reason: "max_tokens" }), async () => {
+    const { diagnostico } = await S.diagnosticar({ conexion: CONEXION, modelo: "claude-sonnet-5-5", contexto: "datos" });
+    assert.equal(diagnostico.incompleta, true);
+    assert.ok(S.verificarRespuestaIA(diagnostico, {}).some((x) => /cortada/.test(x)));
+  });
+});
+
+test("A-35 · solo se aceptan fuentes http(s) (nunca javascript:)", async () => {
+  const bloques = [{ type: "text", text: '{"resumen":"ok"}', citations: [{ url: "javascript:alert(1)", title: "malo" }, { url: "https://honda.com/x", title: "bueno" }] }];
+  await conFetch(async () => responder(200, { content: bloques, stop_reason: "end_turn" }), async () => {
+    const { diagnostico } = await S.diagnosticar({ conexion: CONEXION, modelo: "claude-sonnet-5-5", contexto: "datos" });
+    assert.deepEqual(diagnostico.fuentes.map((f) => f.url), ["https://honda.com/x"]);
+  });
+});
+
+test("A-28 · el servidor bloquea una dirección después de varios códigos equivocados", async () => {
+  const ip = "203.0.113.77";
+  for (let i = 0; i < 6; i++) assert.equal((await worker.fetch(pedido("/v1/probar", { codigo: "adivinando-" + i, ip }), ENV)).status, 401);
+  const bloqueo = await worker.fetch(pedido("/v1/probar", { ip }), ENV);
+  assert.equal(bloqueo.status, 429, "aun con el código correcto, la IP queda bloqueada un rato");
+  assert.match((await bloqueo.json()).error.message, /Demasiados intentos/);
+  assert.equal((await worker.fetch(pedido("/v1/probar", { ip: "203.0.113.78" }), ENV)).status, 200, "otras direcciones siguen funcionando");
+});
+
+test("A-36 · máximo 6 fotos por consulta", () => {
+  const foto = { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJD" } };
+  const con = (n) => ({ ...CUERPO, tools: undefined, messages: [{ role: "user", content: [{ type: "text", text: "x" }, ...Array(n).fill(foto)] }] });
+  assert.doesNotThrow(() => validarCuerpo(con(6), {}));
+  assert.throws(() => validarCuerpo(con(7), {}), /Demasiadas fotos/);
+});

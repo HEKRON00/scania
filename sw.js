@@ -1,5 +1,5 @@
-/* ScanIA · service worker: permite abrir la app sin internet. Versión 6ebc745679 */
-const CACHE = "scania-6ebc745679";
+/* ScanIA · service worker: permite abrir la app sin internet. Versión 7673e92407 */
+const CACHE = "scania-7673e92407";
 const ARCHIVOS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARCHIVOS)));

@@ -581,7 +581,7 @@ details.ocho ul, details.perfil-carro ul { margin: 4px 0; padding-left: 20px; fo
       </div>
       <div class="panel-modo" data-panel="bluetooth">
         <ol class="pasos">
-          <li>Conectá el adaptador al puerto OBD2 (debajo del timón) y poné la llave en <strong>ON</strong> o encendé el motor.</li>
+          <li>Conectá el adaptador al puerto OBD2 (casi siempre debajo del tablero; en algunos carros, como el CR-V 1997–2001, junto a la consola central) y poné la llave en <strong>ON</strong> o encendé el motor.</li>
           <li><strong>Solo la primera vez:</strong> emparejalo en los ajustes de Bluetooth (se llama “OBDII” o parecido; PIN <strong>1234</strong> o <strong>0000</strong>).</li>
           <li>Tocá <strong>Conectar</strong> y elegilo de la lista.</li>
         </ol>
@@ -5211,7 +5211,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     },
     encendido: "distribuidor",
     avisos: [
-      "Antes de conectar: buscá el conector OBD-II de 16 pines debajo del tablero (lado del conductor). Los CR-V vendidos en EE. UU. desde 1996 son OBD-II; un carro de otro mercado podría no serlo o responder distinto.",
+      "Antes de conectar: buscá el conector OBD-II de 16 pines. En los CR-V de EE. UU. de esta generación, según guías de ubicación, está debajo del tablero junto a la consola central, del lado del pasajero (a la altura de su rodilla izquierda). Si en vez de eso solo encontrás un conector Honda de 3 pines, el carro es de otro mercado y NO es OBD-II: un ELM327 no le va a poder leer nada.",
       "Si el tablero marca millas (carro importado de EE. UU.), indicalo en los datos del carro para que el kilometraje y los mantenimientos cuadren.",
       "El motor B20 de esa generación usa distribuidor (una sola bobina): un fallo de encendido en UN cilindro casi nunca es la bobina; lo común es bujía, cable de bujía, inyector o compresión.",
       "La tracción 4x4 'Real Time' es mecánica/hidráulica: el OBD no la ve.",
@@ -7442,7 +7442,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
          ${E.lectura ? `<p>${E.lectura.estado && E.lectura.estado.mil ? "<b class='rojo'>Check engine encendido</b>" : "Check engine apagado"} · ${(E.lectura.codigos || []).length} código(s)</p>` : ""}
          <div class="acciones"><a class="btn primario" href="#escanear">Ver códigos</a><a class="btn" href="#vivo">Datos en vivo</a><a class="btn" href="#pruebas">Pruebas</a></div>`
       : `<h2>Revisá un carro</h2>
-         <ol class="pasos"><li>Conectá el adaptador ELM327 debajo del timón.</li><li>Llave en ON o motor encendido.</li><li>Tocá Conectar.</li></ol>
+         <ol class="pasos"><li>Conectá el adaptador ELM327 al puerto OBD2 (casi siempre debajo del tablero; en algunos carros, junto a la consola central).</li><li>Llave en ON o motor encendido.</li><li>Tocá Conectar.</li></ol>
          <div class="acciones"><a class="btn primario grande" href="#escanear">Conectar</a><button class="btn" id="ini-sim">Probar con el simulador</button></div>
          <p class="nota">El análisis local funciona sin internet. La IA es opcional.</p>`;
     const bs = $("#ini-sim");

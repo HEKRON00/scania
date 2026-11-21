@@ -43,7 +43,7 @@ Lo que sí estaba bien y se conserva: cola de comandos (nunca manda dos comandos
 - **Archivo / función:** `src/almacen.js` → `escribir()`, `guardarEscaneo()`, `guardarCarro()`
 - **Evidencia:** si `localStorage` está lleno o bloqueado, `escribir()` devuelve `false` y el dato queda solo en memoria. Ninguna función avisa: la app muestra "escaneo guardado" aunque se perderá al cerrar.
 - **Consecuencia:** pérdida de escaneos (incluido el que se guarda antes de borrar códigos) sin que el usuario lo sepa.
-- **Solución:** `S.almacen.ultimoError` y evento `fallo-guardado`; la interfaz avisa y sugiere exportar un respaldo. Se agrega `S.almacen.uso()` para ver el espacio ocupado.
+- **Solución:** `S.almacen.ultimoError` y aviso `S.almacen.alFallar(info)`; la interfaz muestra el problema y sugiere exportar un respaldo. Se agrega `S.almacen.uso()` para ver el espacio ocupado.
 
 ---
 

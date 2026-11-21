@@ -45,7 +45,7 @@
     },
     encendido: "distribuidor",
     avisos: [
-      "Antes de conectar: buscá el conector OBD-II de 16 pines debajo del tablero (lado del conductor). Los CR-V vendidos en EE. UU. desde 1996 son OBD-II; un carro de otro mercado podría no serlo o responder distinto.",
+      "Antes de conectar: buscá el conector OBD-II de 16 pines. En los CR-V de EE. UU. de esta generación, según guías de ubicación, está debajo del tablero junto a la consola central, del lado del pasajero (a la altura de su rodilla izquierda). Si en vez de eso solo encontrás un conector Honda de 3 pines, el carro es de otro mercado y NO es OBD-II: un ELM327 no le va a poder leer nada.",
       "Si el tablero marca millas (carro importado de EE. UU.), indicalo en los datos del carro para que el kilometraje y los mantenimientos cuadren.",
       "El motor B20 de esa generación usa distribuidor (una sola bobina): un fallo de encendido en UN cilindro casi nunca es la bobina; lo común es bujía, cable de bujía, inyector o compresión.",
       "La tracción 4x4 'Real Time' es mecánica/hidráulica: el OBD no la ve.",

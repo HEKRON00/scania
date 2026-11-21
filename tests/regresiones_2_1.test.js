@@ -286,3 +286,46 @@ test("Perfil Honda CR-V: se reconoce por datos o por VIN, y separa genérico / m
   assert.deepEqual(S.contrastarPerfil(p, { medicion_aire: "MAF", es_can: true }).length, 2);
   assert.throws(() => S.registrarPerfil({ id: "x", nombre: "x", coincide: () => false }), /fuente/);
 });
+
+test("A-19 · varios adaptadores recordados: se listan todos y se puede olvidar uno", async () => {
+  const olvidados = [];
+  const puertos = [{ id: "A", forget: async () => olvidados.push("A") }, { id: "B", forget: async () => olvidados.push("B") }];
+  const antes = globalThis.navigator;
+  Object.defineProperty(globalThis, "navigator", { value: { serial: { getPorts: async () => puertos } }, configurable: true });
+  try {
+    const r = await S.TransporteSerial.recordados();
+    assert.deepEqual(r.map((p) => p.id), ["A", "B"], "no solo el primero");
+    assert.equal(await S.TransporteSerial.olvidar(r[1]), true);
+    assert.deepEqual(olvidados, ["B"]);
+    assert.equal(await S.TransporteSerial.olvidar({}), false, "si el navegador no permite olvidar, se dice");
+  } finally { Object.defineProperty(globalThis, "navigator", { value: antes, configurable: true }); }
+});
+
+test("A-20 · códigos de EGR, inyector, bobina, presión de combustible y transmisión tienen su regla", () => {
+  const lectura = (codigos) => ({ estado: { mil: true, num_dtc: codigos.length, monitores: [] }, codigos: codigos.map((c) => ({ codigo: c, tipo: "almacenado" })), freeze_frame: null, extras: {} });
+  const casos = { P0401: "egr", P0202: "inyector_circuito", P0352: "bobina_circuito", P0087: "presion_combustible", P0740: "transmision" };
+  for (const [c, id] of Object.entries(casos)) {
+    const h = S.analizar([], lectura([c])).hallazgos.find((x) => x.id === id);
+    assert.ok(h, `${c} → ${id}`);
+    assert.equal(h.certeza, "sospecha", "un código confirmado dice qué sistema, no qué pieza: no es 'confirmada'");
+    assert.ok(h.distinguir && h.no_cambiar, `${id} explica qué no se puede distinguir y qué no cambiar`);
+  }
+  const pend = { estado: { mil: false, num_dtc: 0, monitores: [] }, codigos: [{ codigo: "P0401", tipo: "pendiente" }], freeze_frame: null, extras: {} };
+  assert.equal(S.analizar([], pend).hallazgos.find((x) => x.id === "egr").certeza, "posibilidad", "pendiente = evidencia débil");
+});
+
+test("A-21 · cada diagnóstico trae urgencia; los de datos en vivo dicen en qué condiciones se midió", () => {
+  let t = 1000;
+  const sim = new S.Simulador("fuga_vacio", { reloj: () => t, semilla: 5 });
+  sim._conectado = true; sim.inicio = t;
+  const h = []; for (let i = 0; i < 240; i++) { t += 1; h.push(sim.muestraSync()); }
+  const a = S.analizar(h, sim.leerTodoSync(), { cilindrada: 1.8 });
+  for (const x of a.hallazgos) {
+    // Los avisos informativos (freeze frame, "todo bien") no son diagnósticos y no llevan urgencia
+    if (x.gravedad !== "info" && x.gravedad !== "ok") assert.ok(x.urgencia && S.URGENCIAS[x.urgencia.nivel], `${x.id} sin urgencia válida`);
+    assert.ok(!/\d+\s?%\s*(de probabilidad|probable)/i.test(JSON.stringify(x)), `${x.id} no usa porcentajes de probabilidad`);
+  }
+  const pobre = a.hallazgos.find((x) => /^pobre|fuga_vacio/.test(x.id));
+  assert.ok(pobre, a.hallazgos.map((x) => x.id).join(","));
+  assert.ok(pobre.condiciones && pobre.condiciones.length, "dice en qué condiciones se midió");
+});

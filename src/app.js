@@ -25,7 +25,7 @@
          ${E.lectura ? `<p>${E.lectura.estado && E.lectura.estado.mil ? "<b class='rojo'>Check engine encendido</b>" : "Check engine apagado"} · ${(E.lectura.codigos || []).length} código(s)</p>` : ""}
          <div class="acciones"><a class="btn primario" href="#escanear">Ver códigos</a><a class="btn" href="#vivo">Datos en vivo</a><a class="btn" href="#pruebas">Pruebas</a></div>`
       : `<h2>Revisá un carro</h2>
-         <ol class="pasos"><li>Conectá el adaptador ELM327 debajo del timón.</li><li>Llave en ON o motor encendido.</li><li>Tocá Conectar.</li></ol>
+         <ol class="pasos"><li>Conectá el adaptador ELM327 al puerto OBD2 (casi siempre debajo del tablero; en algunos carros, junto a la consola central).</li><li>Llave en ON o motor encendido.</li><li>Tocá Conectar.</li></ol>
          <div class="acciones"><a class="btn primario grande" href="#escanear">Conectar</a><button class="btn" id="ini-sim">Probar con el simulador</button></div>
          <p class="nota">El análisis local funciona sin internet. La IA es opcional.</p>`;
     const bs = $("#ini-sim");
