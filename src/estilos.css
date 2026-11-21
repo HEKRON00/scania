@@ -499,3 +499,26 @@ dl.info dt { color: var(--tenue); } dl.info dd { margin: 0; }
 .prueba-g .bloque, #pg-cuerpo .bloque { background: var(--tarjeta-2); border-radius: 8px; padding: 8px 10px; }
 [hidden] { display: none !important; }
 .problema-ia .titulo { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; font-weight: 650; margin-bottom: 4px; }
+
+/* ---------- 2.1 ---------- */
+.recordados { display: flex; flex-direction: column; gap: 6px; }
+.fila-rec { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fila-rec .btn:first-child { flex: 1; }
+details.sintomas-local, details.ocho, details.datos-manual, details.perfil-carro { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+details.sintomas-local summary, details.ocho summary, details.datos-manual summary, details.perfil-carro summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.sintomas-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 14px; margin-top: 8px; font-size: .88rem; }
+.urgencia-h { border-radius: 8px; padding: 6px 10px; font-size: .84rem; margin: 6px 0; border-left: 4px solid var(--borde); }
+.urgencia-h.detener { background: var(--rojo-suave); border-left-color: var(--rojo); }
+.urgencia-h.pronto { background: var(--ambar-suave); border-left-color: var(--ambar); }
+.urgencia-h.programar { background: var(--azul-suave); border-left-color: var(--azul); }
+.urgencia-h.vigilar { background: var(--fondo); border-left-color: var(--tenue); }
+.lista-pruebas > h3.grupo-pruebas, .lista-pruebas > .pruebas-grupo { grid-column: 1 / -1; }
+h3.grupo-pruebas { margin: 18px 0 0; font-size: .95rem; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; }
+.pruebas-grupo { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+details.ocho h4, details.perfil-carro h4 { margin: 10px 0 4px; font-size: .86rem; }
+details.ocho ul, details.perfil-carro ul { margin: 4px 0; padding-left: 20px; font-size: .86rem; }
+.resultado-g.no_concluyente { background: var(--azul-suave); }
+.fila-unidad { display: flex; gap: 6px; }
+.fila-unidad input { flex: 1; min-width: 0; }
+.fila-unidad select { width: auto; }
+.reporte-hoja .urgencia-h { background: #f6f7f9; color: #1b1e25; }

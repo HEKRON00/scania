@@ -21,7 +21,7 @@ DIST = RAIZ / "dist"
 WEB = RAIZ   # GitHub Pages publica la raíz de la rama main
 
 ORDEN_JS = ["codigos", "codigos_extra", "datos", "unidades", "simulador", "analizador", "ia", "elm327", "adaptador_virtual", "vin",
-            "fabricantes", "informes", "pruebas", "almacen", "ui_base", "ui_conexion", "ui_pruebas", "ui_ia", "ui_carros", "ui_mas", "app"]
+            "fabricantes", "informes", "pruebas", "perfiles", "almacen", "ui_base", "ui_conexion", "ui_pruebas", "ui_ia", "ui_carros", "ui_mas", "app"]
 
 # Silueta del motor del logo (mismo trazo que el SVG, en una caja de 48x48)
 MOTOR = [(8, 30), (8, 22), (12, 22), (15, 17), (26, 17), (29, 20), (34, 20), (34, 17), (38, 17), (38, 23),

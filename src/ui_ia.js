@@ -75,6 +75,8 @@
       analisis: a,
       texto: S.construirContexto({
         vehiculo: U.vehiculoParaIA(), sintomas: $("#sintomas").value, info: E.fuente ? E.fuente.info() : null, lectura: E.lectura,
+        perfil: U.perfil(), calidad: U.calidadDatos(a.resumen),
+        sintomasMarcados: E.sintomas.map((id) => (S.SINTOMAS.find((x) => x.id === id) || {}).texto).filter(Boolean),
         resumenTexto: S.resumenTexto(a.resumen), hallazgos: a.hallazgos.filter((h) => h.id !== "todo_bien"), series: S.seriesTexto(E.historial),
         pruebas06: E.pruebas06, guiadas: Object.values(E.guiadas), mantenimiento: E.fuente && E.fuente.esSimulador ? [] : mantenimientoTexto(c),
       }),
@@ -92,6 +94,8 @@
     try {
       const ctx = armarContexto();
       const { diagnostico, mensajes } = await S.diagnosticar({ conexion: conexionIA(), modelo: E.ajustes.modelo, contexto: ctx.texto, imagenes: fotos, buscar: $("#ia-buscar").checked });
+      // Se revisa la respuesta contra los datos reales (códigos leídos, sensores que el carro reporta)
+      diagnostico.verificacion = S.verificarRespuestaIA(diagnostico, { codigos: E.lectura ? (E.lectura.codigos || []).map((c) => c.codigo) : null, pids: E.fuente ? E.fuente.pidsDisponibles() : null });
       const c = U.carro();
       const simulado = !!(E.fuente && E.fuente.esSimulador);
       const id = S.almacen.guardarDiagnostico({
@@ -122,6 +126,9 @@
       <div class="urgencia ${nivel}"><span class="nivel">${esc(u[0])}</span>${d.urgencia.puede_manejar === false ? " · No conviene manejarlo" : d.urgencia.puede_manejar === true ? " · Se puede manejar con cuidado" : ""}
         ${d.urgencia.explicacion ? `<p>${U.t(d.urgencia.explicacion)}</p>` : ""}</div>
       <p class="resumen-ia">${U.t(d.resumen)}</p>`;
+    if ((d.verificacion || []).length) h += `<div class="advertencia"><b>Revisión de ScanIA a esta respuesta:</b><ul>${d.verificacion.map((x) => `<li>${U.t(x)}</li>`).join("")}</ul></div>`;
+    else if (d.incompleta) h += `<div class="advertencia">La respuesta de la IA llegó cortada.</div>`;
+    if ((d.evidencias_clave || []).length) h += `<div class="bloque"><b>Evidencias que usó</b><ul>${d.evidencias_clave.map((x) => `<li>${U.t(x)}</li>`).join("")}</ul></div>`;
     if (d.datos_suficientes === false || d.que_falta) h += `<div class="bloque"><b>Datos que faltan para estar seguros</b>${U.t(d.que_falta || "La IA indicó que los datos no alcanzan.")}</div>`;
     if (d.siguiente_paso) h += `<div class="siguiente"><b>Primer paso recomendado:</b> ${U.t(d.siguiente_paso)}</div>`;
     for (const p of d.problemas) {
@@ -141,8 +148,10 @@
     const lista = (t, l, cl = "") => (l && l.length ? `<div class="bloque ${cl}"><b>${t}</b><ul>${l.map((x) => `<li>${U.t(typeof x === "object" ? x.causa + (x.por_que ? " — " + x.por_que : "") : x)}</li>`).join("")}</ul></div>` : "");
     h += lista("Descartado", d.descartado) + lista("No cambiés todavía", d.no_cambiar_todavia, "no-cambiar") + lista("Datos a vigilar", d.datos_a_vigilar) +
       lista("Fallas conocidas de este modelo", d.fallas_conocidas) + lista("Preguntas para afinar el diagnóstico", d.preguntas);
+    h += lista("Limitaciones de este diagnóstico", d.limitaciones);
     if (d.nota_seguridad) h += `<div class="advertencia">${U.t(d.nota_seguridad)}</div>`;
-    if (d.fuentes && d.fuentes.length) h += `<div class="fuentes"><b>Fuentes consultadas</b><ul>${d.fuentes.map((f) => `<li><a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.titulo || f.url)}</a></li>`).join("")}</ul></div>`;
+    const fuentes = (d.fuentes || []).filter((f) => /^https?:\/\//i.test(f.url || ""));
+    if (fuentes.length) h += `<div class="fuentes"><b>Fuentes consultadas</b><ul>${fuentes.map((f) => `<li><a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.titulo || f.url)}</a></li>`).join("")}</ul></div>`;
     h += `<p class="nota">La IA ayuda a interpretar; no reemplaza la revisión de un mecánico. Confirmá antes de cambiar piezas.</p></div>`;
     return h;
   };
@@ -159,7 +168,7 @@
     const div = document.createElement("div");
     div.className = "burbuja " + (rol === "user" ? "usuario" : "ia");
     div.innerHTML = (rol === "user" ? `<p>${U.t(texto)}</p>` : U.md(texto)) +
-      (fuentes && fuentes.length ? `<div class="fuentes">${fuentes.map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.titulo || f.url)}</a>`).join(" · ")}</div>` : "");
+      (fuentes && fuentes.length ? `<div class="fuentes">${fuentes.filter((f) => /^https?:\/\//i.test(f.url || "")).map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.titulo || f.url)}</a>`).join(" · ")}</div>` : "");
     $("#chat-mensajes").appendChild(div);
     div.scrollIntoView({ block: "nearest" });
     return div;
@@ -215,7 +224,7 @@
     const c = U.carro();
     const sim = E.fuente && E.fuente.esSimulador;
     $("#ia-carro").innerHTML = sim ? `<p class="nota">Conectado al <b>simulador</b>: la IA sabrá que los datos no son de un carro real.</p>` :
-      c ? `<p><b>${esc(c.apodo || `${c.marca || ""} ${c.modelo || ""}`)}</b> · ${esc([c.anio, c.motor, c.cilindrada && c.cilindrada + " L", c.transmision, c.km && U.num(c.km) + " km"].filter(Boolean).join(" · "))}
+      c ? `<p><b>${esc(c.apodo || `${c.marca || ""} ${c.modelo || ""}`)}</b> · ${esc([c.anio, c.motor, c.cilindrada && c.cilindrada + " L", c.transmision, c.km && U.kmTexto(c)].filter(Boolean).join(" · "))}
           ${E.ajustes.compartirVIN ? "" : `<span class="nota"> · el VIN no se envía (Ajustes → Privacidad)</span>`}</p>` :
       `<p class="nota">Elegí o agregá el carro en <a href="#carros">Carros</a>: con marca, modelo, año y motor el diagnóstico es mucho más preciso.</p>`;
     const listo = E.ajustes.servidor && E.ajustes.codigo;
@@ -234,6 +243,11 @@
       try { fotoChat = await U.fotoABase64(f); U.toast("Foto lista: se manda con tu próximo mensaje."); } catch (x) { U.toast(x.message, "error"); }
     });
     $("#btn-ia").addEventListener("click", diagnosticar);
+    $("#btn-ver-envio").addEventListener("click", () => {
+      const t = armarContexto().texto;
+      U.modal(`<h2>Esto es lo que se manda a la IA</h2><p class="nota">${E.ajustes.compartirVIN ? "Incluye el VIN (lo permitiste en Ajustes)." : "No incluye el VIN ni el apodo del carro."} Las fotos que agregués también se envían.</p>
+        <pre class="registro">${esc(t)}</pre><div class="acciones"><button class="btn" id="ve-cerrar">Cerrar</button></div>`, () => { $("#ve-cerrar").onclick = U.cerrarModal; });
+    });
     $("#chat-form").addEventListener("submit", enviarChat);
     prepararDictado();
     dibujarCarro();

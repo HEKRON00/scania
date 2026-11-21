@@ -24,6 +24,7 @@
     instalar: null,
     ajustes: S.almacen.ajustes(),
     ultimaConexion: null,    // para reconectar: { tipo, transporte }
+    sintomas: [],            // ids de S.SINTOMAS marcados por el usuario
   };
 
   // ------------------------------------------------------------------ texto
@@ -92,9 +93,38 @@
     delete v.mantenimientos; delete v.intervalos; delete v.id; delete v.creado; delete v.actualizado;
     v._compartirVIN = !!U.estado.ajustes.compartirVIN;
     if (!v._compartirVIN) delete v.vin;
+    delete v.apodo;                          // puede tener nombres de personas: no se envía
     return v;
   };
-  U.analizarAhora = () => S.analizar(U.estado.historial, U.estado.lectura, { pruebas06: U.estado.pruebas06, cilindrada: U.cilindrada() });
+  /** Perfil del vehículo (Honda CR-V 1997–2001, etc.). En el simulador "Honda 2000" se usa el perfil Honda como ejemplo. */
+  U.perfil = function () {
+    const f = U.estado.fuente;
+    if (f && f.esSimulador) return f.info().perfil_sim === "honda2000" ? S.perfilVehiculo({ marca: "Honda", modelo: "CR-V", anio: 2000 }) : null;
+    return S.perfilVehiculo(U.carro(), f ? f.info() : null);
+  };
+  /** Avisos de calidad de los datos (para la IA y para la pantalla). */
+  U.calidadDatos = function (resumen) {
+    const f = U.estado.fuente, out = [];
+    if (resumen && resumen.hz != null) out.push(`${resumen.hz} lecturas por segundo de datos en vivo (con menos de ~4 por segundo no se ven cambios rápidos como los del sensor de oxígeno).`);
+    if (resumen && Object.keys(resumen.invalidos || {}).length) out.push("Hubo datos fuera de rango físico (no usados): " + Object.keys(resumen.invalidos).join(", ") + ".");
+    if (f) {
+      out.push(`Voltaje ${f.usaATRV ? "medido por el adaptador en el conector OBD (ATRV)" : "reportado por la computadora (PID 42)"}.`);
+      for (const a of (f.avisos || []).slice(-5)) out.push(a);
+      if (f.stats && f.stats.tiempos_agotados) out.push(`El adaptador no respondió a tiempo ${f.stats.tiempos_agotados} vez/veces.`);
+    }
+    return out;
+  };
+  U.analizarAhora = () => {
+    const f = U.estado.fuente, p = U.perfil();
+    return S.analizar(U.estado.historial, U.estado.lectura, { pruebas06: U.estado.pruebas06, cilindrada: U.cilindrada(), sintomas: U.estado.sintomas,
+      perfil: p ? { encendido: p.encendido } : null, fuenteVoltaje: f ? (f.usaATRV ? "medido por el adaptador (ATRV)" : "PID 42") : null });
+  };
+  /** Carro con kilometraje: el tablero puede estar en millas (carros importados de EE. UU.). Internamente siempre se guarda en km. */
+  U.kmTexto = function (c) {
+    if (!c || !c.km) return "";
+    const km = Number(c.km);
+    return c.odometro === "mi" ? `${U.num(km)} km (${U.num(Math.round(km / 1.609344))} mi en el tablero)` : `${U.num(km)} km`;
+  };
 
   // ------------------------------------------------------------------ navegación
   const VISTAS = ["inicio", "escanear", "vivo", "pruebas", "ia", "carros", "mas"];

@@ -130,6 +130,7 @@
     });
     $("#btn-bajar-log").addEventListener("click", () => U.descargar(`scania-registro-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.txt`, registroCompleto(), "text/plain"));
     $("#btn-exportar").addEventListener("click", exportar);
+    dibujarUso();
     $("#importar").addEventListener("change", importar);
     $("#sel-marca").innerHTML = `<option value="">Elegí una marca…</option>` + Object.entries(S.FABRICANTES).map(([id, f]) => `<option value="${id}">${esc(f.nombre)}</option>`).join("");
     $("#sel-marca").addEventListener("change", dibujarCapacidades);
@@ -147,6 +148,12 @@
     $("#aj-ver").addEventListener("click", () => { const i = $("#aj-codigo"); i.type = i.type === "password" ? "text" : "password"; });
     setInterval(() => { if ($('.vista[data-vista="mas"]').classList.contains("activa")) dibujarRegistro(); }, 1500);
   });
-  U.on("vista", (v) => { if (v === "mas") dibujarRegistro(); });
+  function dibujarUso() {
+    const el = $("#uso-almacen"); if (!el) return;
+    const kb = S.almacen.uso(), err = S.almacen.ultimoError;
+    el.innerHTML = `ScanIA ocupa unos ${U.num(kb)} KB en este navegador (el límite típico es ~5 000 KB).` +
+      (err ? ` <span class="rojo">Último problema al guardar: ${esc(err.mensaje)} Bajá un respaldo.</span>` : "");
+  }
+  U.on("vista", (v) => { if (v === "mas") { dibujarRegistro(); dibujarUso(); } });
   U.on("carro", () => { const c = U.carro(), fab = c && S.detectarFabricante({ vin: c.vin, marca: c.marca }); if (fab && $("#sel-marca")) { $("#sel-marca").value = fab; dibujarCapacidades(); } });
 })();

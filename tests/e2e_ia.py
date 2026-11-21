@@ -8,7 +8,7 @@ DIAG = {"resumen": "Hay fallos de encendido en el cilindro 2 con evidencia del c
     "causas": [{"causa": "Bobina del cilindro 2", "confianza": "alta", "por_que": "Falla típica", "en_contra": ""}, {"causa": "Bujía gastada", "confianza": "media", "por_que": "", "en_contra": ""}],
     "alternativas": ["Inyector"], "prueba": {"descripcion": "Intercambiá la bobina 2 con la 3 y repetí la prueba de fallos.", "resultado_esperado": "Si el fallo pasa al 3, es la bobina.", "herramientas": ["llave 10 mm"], "donde": "casa", "riesgo": "bajo"},
     "no_reemplazar": "El catalizador ni la computadora."}],
-  "siguiente_paso": "Intercambiar bobinas 2 y 3.", "descartado": [], "datos_a_vigilar": ["Contador de fallos"], "preguntas": ["¿Cuándo cambiaste las bujías?"], "fallas_conocidas": [], "nota_seguridad": ""}
+  "siguiente_paso": "Intercambiar bobinas 2 y 3.", "evidencias_clave": ["P0302 almacenado", "P0420 del catalizador"], "limitaciones": ["Sin prueba de compresión."], "descartado": [], "datos_a_vigilar": ["Contador de fallos"], "preguntas": ["¿Cuándo cambiaste las bujías?"], "fallas_conocidas": [], "nota_seguridad": ""}
 async def main():
     srv = subprocess.Popen([sys.executable, "-m", "http.server", "8767", "--bind", "127.0.0.1"], cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.6)
@@ -44,6 +44,10 @@ async def main():
         print("diag:", (await pg.inner_text("#resultado-ia"))[:300].replace("\n", " | "))
         await pg.fill("#chat-texto", "¿Qué hago primero?"); await pg.click("#chat-form button[type=submit]")
         await pg.wait_for_function("document.querySelectorAll('#chat-mensajes .burbuja.ia:not(.pensando)').length >= 1", timeout=20000)
+        res = await pg.inner_text("#resultado-ia")
+        print("verificación:", "P0420" in res and "NO está entre los leídos" in res, "| limitaciones:", "Sin prueba de compresión" in res)
+        assert "P0420" in res and "NO está entre los leídos" in res, "ScanIA debe avisar si la IA cita un código que no se leyó"
+        assert "Sin prueba de compresión" in res, "se muestran las limitaciones"
         print("chat:", await pg.inner_text("#chat-mensajes"))
         os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "capturas"), exist_ok=True)
         await pg.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "capturas", "ia.png"), full_page=True)

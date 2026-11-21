@@ -10,8 +10,11 @@
     ["motor", "Motor (ej. 1.8 VVT-i)", "text"], ["codigo_motor", "Código de motor (ej. 2ZR-FE)", "text"], ["cilindrada", "Cilindrada en litros (ej. 1.8)", "decimal"],
     ["cilindros", "Cilindros", "numeric"], ["combustible", "Combustible", ["", "Gasolina", "Diésel", "Híbrido", "GLP / gas"]],
     ["transmision", "Transmisión", ["", "Manual", "Automática", "CVT", "Doble embrague"]], ["traccion", "Tracción", ["", "Delantera", "Trasera", "4x4 / AWD"]],
-    ["km", "Kilometraje actual", "numeric"], ["vin", "VIN (opcional, 17 caracteres)", "text"],
+    ["km", "Lo que marca el tablero (odómetro)", "numeric"], ["vin", "VIN (opcional, 17 caracteres)", "text"],
   ];
+  const MI = 1.609344;
+  /** Valor del odómetro en la unidad del tablero (el carro guarda siempre km). */
+  const enTablero = (c) => (c.km ? (c.odometro === "mi" ? Math.round(Number(c.km) / MI) : Number(c.km)) : "");
 
   // ================================================================== formulario
   function formCarro(c = {}) {
@@ -19,7 +22,13 @@
     U.modal(`<h2>${c.id ? "Editar carro" : "Agregar carro"}</h2>
       <div class="form-carro">${CAMPOS.map(([k, n, t]) => Array.isArray(t)
         ? `<label>${n}<select data-campo="${k}">${t.map((o) => `<option${(c[k] || "") === o ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`
-        : `<label>${n}<input data-campo="${k}" value="${esc(c[k] ?? "")}" ${t === "text" ? "" : `inputmode="${t}"`} ${k === "vin" ? 'maxlength="17" spellcheck="false" autocomplete="off"' : ""}></label>`).join("")}</div>
+        : k === "km"
+          ? `<label>${n}<span class="fila-unidad"><input data-campo="km" value="${esc(enTablero(c))}" inputmode="numeric"><select data-campo="odometro"><option value="km"${c.odometro !== "mi" ? " selected" : ""}>km</option><option value="mi"${c.odometro === "mi" ? " selected" : ""}>millas</option></select></span></label>`
+          : `<label>${n}<input data-campo="${k}" value="${esc(c[k] ?? "")}" ${t === "text" ? "" : `inputmode="${t}"`} ${k === "vin" ? 'maxlength="17" spellcheck="false" autocomplete="off"' : ""}></label>`).join("")}</div>
+      <details class="datos-manual"${Object.keys(c.especificaciones || {}).length ? " open" : ""}><summary>Datos del manual (opcional)</summary>
+        <p class="nota">ScanIA no inventa valores de fábrica. Si los anotás de tu manual, las pruebas guiadas los usan para comparar.</p>
+        <div class="form-carro">${S.CAMPOS_MANUAL.map((m) => `<label>${esc(m.nombre)}<input data-espec="${m.clave}" value="${esc((c.especificaciones || {})[m.clave] ?? "")}" placeholder="${esc(m.ayuda)}"></label>`).join("")}</div>
+      </details>
       <label>Notas (fallas que ya tuvo, modificaciones, etc.)<textarea data-campo="notas" rows="2">${esc(c.notas || "")}</textarea></label>
       <div class="acciones">
         ${leido ? `<button class="btn" id="fc-vin-leido">Usar el VIN leído del carro</button>` : ""}
@@ -54,11 +63,15 @@
       $("#fc-cancelar").onclick = U.cerrarModal;
       $("#fc-guardar").onclick = () => {
         const datos = { ...(c.id ? { id: c.id } : {}) };
-        for (const [k] of CAMPOS) datos[k] = campo(k).value.trim();
+        for (const [k] of CAMPOS) datos[k] = String(campo(k).value).trim();
         datos.notas = campo("notas").value.trim();
         if (datos.vin && datos.vin.length !== 17) { $("#fc-vin-msg").textContent = "El VIN debe tener 17 caracteres (o dejalo vacío)."; return; }
         if (datos.cilindrada) datos.cilindrada = datos.cilindrada.replace(",", ".");
-        if (datos.km) datos.km = Number(String(datos.km).replace(/\D/g, "")) || "";
+        datos.odometro = campo("odometro").value;
+        if (datos.km) { const v = Number(String(datos.km).replace(/\D/g, "")) || 0; datos.km = v ? (datos.odometro === "mi" ? Math.round(v * MI) : v) : ""; }
+        const espec = {};
+        $$("[data-espec]").forEach((x) => { const v = x.value.trim(); if (v) espec[x.dataset.espec] = v; });
+        datos.especificaciones = espec;
         if (!datos.apodo && !datos.marca && !datos.modelo) { $("#fc-vin-msg").textContent = "Poné al menos un apodo o la marca y el modelo."; return; }
         const id = A().guardarCarro(datos);
         if (!c.id || !A().carroActivoId()) A().elegirCarro(id);
@@ -81,7 +94,7 @@
       return `<div class="carro-card${c.id === activo ? " activo" : ""}" data-carro="${c.id}">
         <div class="ap">${esc(nombreCarro(c))}</div>
         <div class="nota">${esc([c.marca, c.modelo, c.anio, c.motor].filter(Boolean).join(" · "))}</div>
-        <div class="nota">${c.km ? U.num(c.km) + " km" : "km sin registrar"}${venc ? ` · <span class="rojo">${venc} mantenimiento(s) vencido(s)</span>` : ""}</div>
+        <div class="nota">${c.km ? esc(U.kmTexto(c)) : "km sin registrar"}${venc ? ` · <span class="rojo">${venc} mantenimiento(s) vencido(s)</span>` : ""}</div>
         ${c.id === activo ? `<span class="chip ok">Carro activo</span>` : `<button class="btn chico" data-activar="${c.id}">Usar este carro</button>`}
       </div>`;
     }).join("") + (carros.length ? "" : `<div class="vacio">Todavía no hay carros. Agregá uno para guardar su historial y mantenimiento.</div>`) +
@@ -93,6 +106,19 @@
   }
   U.dibujarCarros = dibujar;
 
+  /** Lo que se puede revisar en este modelo: A (OBD genérico), B (escáner de la marca), C (pruebas físicas). */
+  function htmlPerfil(p) {
+    if (!p) return "";
+    const l = (x) => `<ul>${x.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`;
+    return `<details class="perfil-carro"><summary>Perfil: ${esc(p.nombre)}${p.validado ? "" : ` <span class="chip">sin validar con información de fábrica</span>`}</summary>
+      <p class="nota">${esc(p.fuente)}</p>
+      <div class="advertencia">${l(p.avisos)}</div>
+      <h4>A. Lo que ScanIA puede ver por OBD-II genérico</h4>${l(p.A)}
+      <h4>B. Lo que requiere el escáner o la información de servicio de la marca</h4>${l(p.B)}
+      <h4>C. Lo que requiere pruebas físicas</h4>${l(p.C)}
+      <p class="nota">Esperado al conectar (se confirma con el carro real): ${esc(Object.values(p.esperado).join(" · "))}</p></details>`;
+  }
+
   function detalle(c) {
     const el = $("#detalle-carro");
     if (!c) { el.classList.add("oculto"); return; }
@@ -103,9 +129,11 @@
     const ESTADO_M = { vencido: "Vencido", pronto: "Pronto", ok: "Al día", sin_dato: "Sin registro" };
     el.innerHTML = `<div class="cabecera"><h2>${esc(nombreCarro(c))}</h2>
         <div class="acciones"><button class="btn" id="dc-editar">Editar</button><button class="btn" id="dc-km">Actualizar km</button><button class="btn peligro" id="dc-borrar">Borrar</button></div></div>
-      <dl class="info">${CAMPOS.filter(([k]) => c[k]).map(([k, n]) => `<dt>${esc(n.replace(/ \(.*\)/, ""))}</dt><dd>${esc(k === "km" ? U.num(c.km) : c[k])}</dd>`).join("")}
-        ${fab ? `<dt>Fabricante</dt><dd>${esc(S.FABRICANTES[fab].nombre)}</dd>` : ""}</dl>
+      <dl class="info">${CAMPOS.filter(([k]) => c[k]).map(([k, n]) => `<dt>${esc(k === "km" ? "Kilometraje" : n.replace(/ \(.*\)/, ""))}</dt><dd>${esc(k === "km" ? U.kmTexto(c) : c[k])}</dd>`).join("")}
+        ${fab ? `<dt>Fabricante</dt><dd>${esc(S.FABRICANTES[fab].nombre)}</dd>` : ""}
+        ${S.CAMPOS_MANUAL.filter((m) => (c.especificaciones || {})[m.clave]).map((m) => `<dt>${esc(m.nombre)}</dt><dd>${esc(c.especificaciones[m.clave])} <span class="nota">(manual)</span></dd>`).join("")}</dl>
       ${c.notas ? `<p class="nota">${esc(c.notas)}</p>` : ""}
+      ${htmlPerfil(S.perfilVehiculo(c, null))}
 
       <h3>Mantenimiento</h3>
       <p class="nota">Los intervalos son típicos; ajustalos según el manual de tu carro (botón Intervalos).</p>
@@ -136,7 +164,7 @@
       for (const e of A().escaneos(c.id)) A().actualizarEscaneo(e.id, { carroId: null });
       A().borrarCarro(c.id); U.emit("carro"); dibujar(null);
     });
-    $("#dc-km").onclick = () => pedirTexto("Kilometraje actual", c.km || "", "numeric", (v) => { const km = Number(String(v).replace(/\D/g, "")); if (km) { A().guardarCarro({ id: c.id, km }); dibujar(c.id); U.emit("carro"); } });
+    $("#dc-km").onclick = () => pedirTexto(c.odometro === "mi" ? "Lo que marca el tablero (millas)" : "Kilometraje actual", enTablero(c), "numeric", (v) => { const n = Number(String(v).replace(/\D/g, "")); if (n) { A().guardarCarro({ id: c.id, km: c.odometro === "mi" ? Math.round(n * MI) : n }); dibujar(c.id); U.emit("carro"); } });
     $$("[data-mant]").forEach((b) => b.addEventListener("click", () => registrarMant(c, mant[Number(b.dataset.mant)].tipo)));
     $("#dc-reparacion").onclick = () => registrarMant(c, "");
     $("#dc-intervalos").onclick = () => editarIntervalos(c);
@@ -241,7 +269,7 @@
     jsonReporte = datos; nombreReporte = nombre || "reporte";
     const c = carro === undefined ? U.carro() : carro;
     $("#reporte-hoja").innerHTML = `<header class="rep-cab"><div><h1>${esc(titulo)}</h1><p>ScanIA · ${esc(new Date().toLocaleString("es-HN"))}</p></div>
-        <div class="rep-carro">${c ? `<b>${esc(nombreCarro(c))}</b><br>${esc([c.marca, c.modelo, c.anio, c.motor].filter(Boolean).join(" · "))}${c.km ? `<br>${U.num(c.km)} km` : ""}` : ""}</div></header>
+        <div class="rep-carro">${c ? `<b>${esc(nombreCarro(c))}</b><br>${esc([c.marca, c.modelo, c.anio, c.motor].filter(Boolean).join(" · "))}${c.km ? `<br>${esc(U.kmTexto(c))}` : ""}` : ""}</div></header>
       ${simulado ? `<div class="advertencia">DATOS DE SIMULADOR — no corresponden a un carro real.</div>` : ""}
       ${cuerpo}
       <footer class="rep-pie">ScanIA orienta el diagnóstico con OBD2 genérico; no reemplaza la revisión física de un mecánico. Confirmá antes de cambiar piezas.</footer>`;

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, $$ = U.$$, esc = U.esc;
-  S.VERSION = "2.0.0";
+  S.VERSION = "2.1.0";
 
   // ================================================================== barra superior y selector de carro
   function dibujarBarra() {
@@ -86,6 +86,13 @@
     $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") U.cerrarModal(); });
     $("#modal-ajustes").addEventListener("click", (e) => { if (e.target.id === "modal-ajustes") $("#modal-ajustes").classList.add("oculto"); });
 
+    // Si el navegador no deja guardar (lleno o modo privado), se avisa una vez por sesión en vez de perder datos en silencio
+    let avisado = false;
+    S.almacen.alFallar = (info) => {
+      if (avisado) return;
+      avisado = true;
+      U.toast(`${info.mensaje} Lo último NO quedó guardado. Bajá un respaldo en Más → Respaldo.`, "error");
+    };
     U.emit("init");
     prepararPWA();
     dibujarBarra();

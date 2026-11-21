@@ -2,24 +2,34 @@
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, esc = U.esc;
-  const VEREDICTO = { ok: "Bien", regular: "Regular", mal: "Mal", error: "No se pudo medir" };
-  const ctx = () => ({ cilindrada: U.cilindrada() });
+  const VEREDICTO = { ok: "Bien", regular: "Regular", mal: "Mal", error: "No se pudo medir", no_concluyente: "No concluyente" };
+  const ctx = () => {
+    const f = E.fuente, r = U.analizarAhora().resumen, c = U.carro();
+    return { cilindrada: U.cilindrada(), medicion: f ? f.info().medicion_aire : r.medicion, fuente: f,
+      baro: r.general.baro ? r.general.baro.prom : r.map_apagado && r.map_apagado.n >= 3 ? r.map_apagado.prom : null,
+      reinicios: f && f.stats ? f.stats.reinicios : 0, espec: (c && c.especificaciones) || {} };
+  };
 
   // ================================================================== lista de pruebas
   function dibujarLista() {
-    const f = E.fuente;
-    $("#lista-pruebas").innerHTML = S.PRUEBAS_GUIADAS.map((p) => {
-      const falta = f ? p.requiere(f, ctx()) : "Conectate al carro (o al simulador) primero.";
+    const f = E.fuente, cx = f ? ctx() : null;
+    const tarjeta = (p) => {
+      const sinCarro = !p.pasos.some((x) => x.tipo !== "manual");
+      const falta = sinCarro ? p.requiere(f, cx) : f ? p.requiere(f, cx) : "Conectate al carro (o al simulador) primero.";
       const r = E.guiadas[p.id];
       return `<div class="prueba-g">
         <div class="tit">${esc(p.titulo)}</div>
         <div class="chips"><span class="chip">Dificultad: ${esc(p.dificultad)}</span><span class="chip riesgo-${esc(p.riesgo)}">Riesgo: ${esc(p.riesgo)}</span></div>
         <p>${U.t(p.descripcion)}</p>
-        <p class="nota"><b>Necesitás:</b> ${U.t(p.herramientas)}<br><b>Condiciones:</b> ${U.t(p.condiciones)}</p>
+        <p class="nota"><b>Necesitás:</b> ${U.t(p.herramientas)}<br><b>Condiciones:</b> ${U.t(p.condiciones)}${p.donde === "mecánico" ? "<br><b>Se hace en el taller</b>: aquí solo se interpretan los números." : ""}</p>
         ${r ? `<div class="resultado-g ${esc(r.veredicto)}"><b>${esc(VEREDICTO[r.veredicto])}:</b> ${U.t(r.resumen)}</div>` : ""}
         ${falta ? `<p class="nota">${U.t(falta)}</p>` : ""}
         <div class="acciones"><button class="btn${falta ? "" : " primario"}" data-prueba="${esc(p.id)}" ${falta ? "disabled" : ""}>${r ? "Repetir" : "Empezar"}</button></div>
       </div>`;
+    };
+    $("#lista-pruebas").innerHTML = Object.entries(S.GRUPOS_PRUEBAS).map(([g, nombre]) => {
+      const lista = S.PRUEBAS_GUIADAS.filter((p) => p.grupo === g);
+      return lista.length ? `<h3 class="grupo-pruebas">${esc(nombre)}</h3><div class="pruebas-grupo">${lista.map(tarjeta).join("")}</div>` : "";
     }).join("");
     document.querySelectorAll("[data-prueba]").forEach((b) => b.addEventListener("click", () => abrirPrueba(b.dataset.prueba)));
   }
@@ -29,13 +39,21 @@
 
   function abrirPrueba(id) {
     const p = S.PRUEBAS_GUIADAS.find((x) => x.id === id);
-    if (!p || !E.fuente) return;
+    const soloManual = p && !p.pasos.some((x) => x.tipo !== "manual");
+    if (!p || (!E.fuente && !soloManual)) return;
     const intro = `<h2>${esc(p.titulo)}</h2>
       ${p.advertencia ? `<div class="advertencia">${U.t(p.advertencia)}</div>
-        <label class="check"><input type="checkbox" id="pg-acepto"> Tengo las condiciones seguras y otra persona maneja</label>` : ""}
-      <p class="nota"><b>Necesitás:</b> ${U.t(p.herramientas)} · <b>Condiciones:</b> ${U.t(p.condiciones)}</p>
-      <p class="nota"><b>Valores de referencia:</b> ${U.t(p.referencia)}</p>
-      ${E.fuente.esSimulador ? `<p class="nota">Simulador: las acciones (apagar, arrancar, encender luces…) se simulan solas.</p>` : ""}
+        <label class="check"><input type="checkbox" id="pg-acepto"> Leí la advertencia y tengo las condiciones seguras</label>` : ""}
+      <details class="ocho"><summary>Preparación, herramientas, condiciones, referencias e interpretación</summary>
+        <div class="bloque"><b>1. Preparación</b>${U.t(p.preparacion)}</div>
+        <div class="bloque"><b>2. Herramientas</b>${U.t(p.herramientas)}</div>
+        <div class="bloque"><b>3. Procedimiento</b><ol>${p.pasos.map((x) => `<li>${U.t(x.texto)}</li>`).join("")}</ol></div>
+        <div class="bloque"><b>4. Condiciones de medición</b>${U.t(p.condiciones)}</div>
+        <div class="bloque"><b>5. Valores de referencia</b>${U.t(p.referencia)}</div>
+        <div class="bloque"><b>6. Cómo se interpreta</b>${U.t(p.interpretacion)}</div>
+        <div class="bloque"><b>7–8. Resultado y próxima prueba</b>Al terminar verás el resultado y qué conviene hacer después.</div>
+      </details>
+      ${E.fuente && E.fuente.esSimulador ? `<p class="nota">Simulador: las acciones (apagar, arrancar, encender luces…) se simulan solas.</p>` : ""}
       <div id="pg-cuerpo"></div>
       <div class="acciones"><button class="btn primario" id="pg-empezar"${p.advertencia ? " disabled" : ""}>Empezar</button><button class="btn" id="pg-cancelar">Cancelar</button></div>`;
     U.modal(intro, () => {
@@ -64,6 +82,7 @@
   async function correr(p) {
     const run = (ejecucion = { cancelada: false });
     const vivo = () => !run.cancelada && E.fuente && !$("#modal").classList.contains("oculto");
+    const vivoManual = () => !run.cancelada && !$("#modal").classList.contains("oculto");
     const datos = {};
     const cuerpo = $("#pg-cuerpo");
     try {
@@ -73,11 +92,13 @@
           <div id="pg-accion" class="acciones"></div><div class="lectura-viva" id="pg-valor"></div>
           <div class="progreso"><span id="pg-barra"></span></div><p class="nota" id="pg-estado"></p>`;
         // Pasos sin condición automática: se espera a que el usuario indique que está listo
+        if (paso.tipo === "manual") { datos.__manual = true; Object.assign(datos, await pedirValores(paso)); if (!vivoManual()) return; continue; }
         if (!paso.condicion || paso.boton) await esperarBoton(paso.boton || "Medir");
         if (!vivo()) return;
         if (paso.evento) E.fuente.simularEvento(paso.evento);   // solo hace algo en el simulador
         if (paso.tipo === "voltaje") datos[paso.clave] = await medirVoltaje(paso, vivo);
         else if (paso.tipo === "pid") datos[paso.clave] = await medirPid(paso, vivo);
+        else if (paso.tipo === "marca") datos[paso.clave] = await medirConMarca(paso, vivo);
         else if (paso.tipo === "modo06") {
           $("#pg-estado").textContent = "Leyendo las pruebas internas…";
           datos[paso.clave] = E.pruebas06 = await E.fuente.leerPruebas06();
@@ -108,6 +129,50 @@
   }
 
   /** Lecturas rápidas del voltaje del adaptador (pausa los datos en vivo para ir más rápido). */
+  /** Paso manual: el usuario escribe lo que midió con una herramienta. */
+  function pedirValores(paso) {
+    return new Promise((res) => {
+      const cx = ctx();
+      $("#pg-accion").innerHTML = `<div class="form-carro">${paso.campos.map((c) => {
+        const pre = c.clave === "minimo" ? cx.espec.compresion_min : c.clave === "espec" ? cx.espec.presion_comb : "";
+        return `<label>${esc(c.etiqueta)}${c.unidad ? ` (${esc(c.unidad)})` : ""}<input data-campo="${esc(c.clave)}" inputmode="decimal" value="${esc(pre ? String(pre).replace(/[^0-9.,]/g, "") : "")}"></label>`;
+      }).join("")}</div><button class="btn primario" id="pg-guardar-valores">Listo</button>`;
+      $("#pg-guardar-valores").onclick = () => {
+        const out = {};
+        for (const c of paso.campos) {
+          const t = String(document.querySelector(`[data-campo="${c.clave}"]`).value).replace(",", ".").trim();
+          const v = t === "" ? null : Number(t);
+          if (t !== "" && (!Number.isFinite(v) || v < c.min || v > c.max)) { U.toast(`Revisá el valor de "${c.etiqueta}".`, "error"); return; }
+          if (v == null && !c.opcional) { U.toast(`Falta "${c.etiqueta}".`, "error"); return; }
+          out[c.clave] = v;
+        }
+        res(out);
+      };
+    });
+  }
+
+  /** Junta datos y deja que el usuario marque cuándo pasó algo (ej. "el ventilador encendió"). */
+  async function medirConMarca(paso, vivo) {
+    const marcas = [], muestras = [];
+    const b = document.createElement("button");
+    b.className = "btn primario"; b.textContent = paso.botonMarca;
+    $("#pg-accion").appendChild(b);
+    b.onclick = () => { marcas.push(Date.now() / 1000); b.disabled = true; b.textContent = "Marcado ✓"; if (E.fuente.esSimulador) E.fuente.simularEvento("cargas_off"); };
+    const t0 = performance.now(), dur = paso.segundos * 1000;
+    let vistas = E.historial.length;
+    while (vivo() && performance.now() - t0 < dur) {
+      for (const m of E.historial.slice(vistas)) { muestras.push(m); if (paso.terminarSi && paso.terminarSi(m)) { barra(1, "Se alcanzó el límite de temperatura: apagá el motor y dejalo enfriar."); return { muestras, marcas }; } }
+      vistas = E.historial.length;
+      const u = E.historial[E.historial.length - 1];
+      if (u) mostrarValor("temp_motor", u.temp_motor);
+      if (marcas.length && Date.now() / 1000 - marcas[0] > (paso.despuesDeMarca || 60)) break;
+      barra((performance.now() - t0) / dur, marcas.length ? "Midiendo después del encendido del ventilador…" : `Esperando… ${muestras.length} lecturas`);
+      await U.esperar(300);
+    }
+    b.remove();
+    return { muestras, marcas };
+  }
+
   async function medirVoltaje(paso, vivo) {
     E.pausado = true;
     await U.esperar(250);
@@ -171,9 +236,10 @@
     E.pausado = true;
     await U.esperar(250);
     const vals = [], t0 = performance.now(), dur = paso.segundos * 1000;
+    const pid = paso.pidSegun ? paso.pidSegun(E.fuente) : paso.pid;
     while (vivo() && performance.now() - t0 < dur) {
-      const v = await E.fuente.leerPid(paso.pid).catch((e) => { if (U.esErrorConexion(e)) throw e; return null; });
-      if (v != null) { vals.push({ t: Date.now() / 1000, v }); mostrarValor(paso.pid, v); }
+      const v = await E.fuente.leerPid(pid).catch((e) => { if (U.esErrorConexion(e)) throw e; return null; });
+      if (v != null) { vals.push({ t: Date.now() / 1000, v }); mostrarValor(pid, v); }
       barra((performance.now() - t0) / dur, `${vals.length} lecturas`);
       if (E.fuente.esSimulador) await U.esperar(90);
     }
@@ -183,9 +249,9 @@
 
   function mostrarResultado(p, r) {
     const res = { prueba: p.id, titulo: p.titulo, veredicto: r.veredicto, resumen: r.resumen, detalle: r.detalle || "", valores: r.valores || [],
-      siguiente: (p.siguiente || {})[r.veredicto] || "", simulado: !!E.fuente.esSimulador };
+      siguiente: (p.siguiente || {})[r.veredicto] || "", simulado: !!(E.fuente && E.fuente.esSimulador), manual: p.pasos.every((x) => x.tipo === "manual") };
     E.guiadas[p.id] = res;
-    if (r.veredicto !== "error") {
+    if (r.veredicto !== "error" && r.veredicto !== "no_concluyente") {
       const c = U.carro();
       S.almacen.guardarPrueba({ ...res, carroId: c && !res.simulado ? c.id : null, km: c && c.km ? Number(c.km) : null });
     }
@@ -225,6 +291,14 @@
     const otras = p.pruebas.filter((x) => !(x.mid >= 0xa1 && x.mid <= 0xad));
     const fab = otras.some((x) => x.estandar === false || x.escala_conocida === false);
     html += `<p class="nota">${p.pruebas.length} resultados · ${p.fallidas.length ? `<b>${p.fallidas.length} fuera de límite</b>` : "todos dentro de sus límites"}.</p>`;
+    if (p.formato === "no_can") {
+      const h = (n) => n.toString(16).toUpperCase().padStart(2, "0");
+      el.innerHTML = html + `<div class="tabla-scroll"><table class="m06"><tr><th>Prueba (TID)</th><th>Componente (CID)</th><th>Valor</th><th>Límite</th><th></th><th>Datos originales</th></tr>${otras.map((x) =>
+        `<tr class="${x.ok ? "" : "falla"}"><td>${h(x.tid)}</td><td>${h(x.cid)}</td><td class="num">${x.valor}</td><td class="num">${x.tipo_limite === "min" ? "mínimo" : "máximo"} ${x.limite}</td>
+          <td>${x.ok ? "✓" : "✗ fuera"}</td><td class="num">${esc(x.crudo)}</td></tr>`).join("")}</table></div>
+        <p class="nota">${esc(p.nota || "")} No existe en ScanIA una correspondencia validada entre estos números y los componentes de tu carro: la da la información de servicio del fabricante.</p>`;
+      return;
+    }
     if (otras.length) {
       html += `<div class="tabla-scroll"><table class="m06"><tr><th>Sistema</th><th>Prueba</th><th>Valor</th><th>Límites</th><th></th></tr>${otras.map((x) => {
         const u = esc(x.unidad || "");
@@ -240,6 +314,7 @@
   async function revisarUsado() {
     if (!E.fuente) return;
     const vin = $("#u-vin").value.trim().toUpperCase(), anio = Number($("#u-anio").value) || null, km = Number(String($("#u-km").value).replace(/\D/g, "")) || null;
+    const unidad = $("#u-unidad").value;
     if (vin && vin.length !== 17) { $("#usado").innerHTML = `<p class="mensaje error">El VIN tiene 17 caracteres (tiene ${vin.length}).</p>`; return; }
     const b = $("#btn-usado");
     U.cargando(b, true, "Revisando…");
@@ -247,8 +322,8 @@
     try {
       const id = await U.revisionCompleta("revision_usado");
       if (!E.lectura) throw new Error("No se pudo leer el carro.");
-      const r = S.revisionUsado({ lectura: E.lectura, info: E.fuente.info(), pruebas06: E.pruebas06, resumen: U.analizarAhora().resumen, declarado: { vin, anio, km } });
-      r.fecha = Date.now() / 1000; r.declarado = { vin, anio, km }; r.simulado = !!E.fuente.esSimulador;
+      const r = S.revisionUsado({ lectura: E.lectura, info: E.fuente.info(), pruebas06: E.pruebas06, resumen: U.analizarAhora().resumen, declarado: { vin, anio, km, unidad } });
+      r.fecha = Date.now() / 1000; r.declarado = { vin, anio, km, unidad }; r.simulado = !!E.fuente.esSimulador;
       E.ultimaRevisionUsado = r;
       if (id) S.almacen.actualizarEscaneo(id, { revision_usado: r });   // el veredicto queda junto al escaneo
       $("#usado").innerHTML = htmlUsado(r) + `<div class="acciones"><button class="btn" id="u-reporte">Ver reporte para imprimir</button></div>`;

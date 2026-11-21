@@ -12,7 +12,7 @@
     let transporte;
     try {
       if (reusar) transporte = reusar;
-      else if (tipo === "simulador") transporte = new S.TransporteVirtual($("#sel-escenario").value);
+      else if (tipo === "simulador") transporte = new S.TransporteVirtual($("#sel-escenario").value, { perfil: $("#sel-perfil-sim").value });
       else if (tipo === "ble") transporte = await S.TransporteBLE.elegir();
       else transporte = await S.TransporteSerial.elegir(Number(E.ajustes.baud) || 38400);
     } catch (e) { U.mensaje($("#msg-conexion"), e.message, "error"); return; }
@@ -42,6 +42,7 @@
     } finally {
       U.cargando(boton, false);
       U.emit("conexion");
+      if (tipo === "serial") dibujarRecordados();
     }
   }
 
@@ -100,10 +101,15 @@
   }
 
   function mostrarInfo(info) {
-    const filas = [["Conexión", info.puerto], ["Protocolo", info.protocolo], ["Adaptador", info.elm], ["VIN", info.vin || "no disponible"],
-      ["Computadora", info.computadora], ["Calibración", info.calibracion], ["Datos en vivo", `${(info.pids || []).length} sensores`],
-      ["Lectura rápida", info.lectura_rapida ? "sí (varios sensores por consulta)" : "no (uno por uno)"], ["Encabezados CAN", info.encabezados ? "sí" : "no"]];
-    $("#info-obd").innerHTML = filas.filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    const filas = [["Conexión", info.puerto], ["Protocolo", info.protocolo + (info.es_can === false ? " (no CAN)" : "")], ["Adaptador", info.elm],
+      ["VIN", info.vin || "no disponible (común antes de ~2005)"], ["Computadora", info.computadora], ["Calibración", info.calibracion],
+      ["Medición de aire", info.medicion_aire === "MAP" ? "sensor MAP (sin MAF)" : info.medicion_aire], ["Datos en vivo", `${(info.pids || []).length} datos`],
+      ["Sensores de oxígeno", info.sensores_o2 != null ? `${info.sensores_o2} (mapa PID ${info.mapa_o2})` : "según los PIDs soportados"],
+      ["Lectura rápida", info.lectura_rapida ? "sí (varios datos por consulta)" : "no (uno por uno)"], ["Encabezados CAN", info.es_can === false ? "no aplica" : info.encabezados ? "sí" : "no"]];
+    const p = U.perfil();
+    const contraste = p && !(E.fuente && E.fuente.esSimulador) ? S.contrastarPerfil(p, info) : [];
+    $("#info-obd").innerHTML = filas.filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") +
+      (p ? `<dt>Perfil</dt><dd>${esc(p.nombre)}${contraste.length ? `<div class="aviso">${contraste.map(esc).join("<br>")}</div>` : ""}</dd>` : "");
   }
 
   /** Si el VIN que leyó la computadora coincide con un carro guardado, se elige ese carro. */
@@ -150,9 +156,6 @@
     })();
   }
 
-  // Rangos físicos posibles: fuera de ellos el dato es sospechoso (sensor desconectado, adaptador con error)
-  const RANGO = { temp_motor: [-39, 140], temp_admision: [-39, 90], temp_aceite: [-39, 160], rpm: [0, 9000], voltaje: [6, 18], maf: [0, 600], map: [5, 255],
-    stft1: [-50, 50], ltft1: [-50, 50], stft2: [-50, 50], ltft2: [-50, 50], o2_b1s1: [0, 1.275], o2_b1s2: [0, 1.275], lambda_b1s1: [0.5, 2] };
   function nivelValor(clave, v, u) {
     if (v == null) return "";
     const enc = (u.rpm || 0) > 400;
@@ -219,8 +222,10 @@
 
   function dibujarTiles() {
     if (!E.fuente) return;
-    const u = E.historial[E.historial.length - 1];
-    if (!u) return;
+    const ult = E.historial[E.historial.length - 1];
+    if (!ult) return;
+    // Los recuadros muestran el último valor conocido de cada dato (aunque sea viejo, marcado como tal); el análisis solo usa datos frescos.
+    const u = { ...(E.fuente.ultimos ? E.fuente.ultimos() : ult), t: ult.t };
     const claves = E.fuente.pidsDisponibles().filter((c) => c !== "tiempo_motor" && u[c] != null);
     if (claves.join(",") !== E.tilesDe) crearTiles(claves);
     const ultimos = E.historial.slice(-90), ahora = Date.now() / 1000;
@@ -231,13 +236,13 @@
       tile.querySelector(".num").textContent = val.texto;
       tile.querySelector(".unidad").textContent = val.unidad;
       const nivel = nivelValor(c, v, u);
-      const r = RANGO[c], fuera = r && v != null && (v < r[0] || v > r[1]);
+      const fuera = v != null && !S.valorPlausible(c, v);
       tile.classList.toggle("warn", nivel === "warn" || fuera);
       tile.classList.toggle("bad", nivel === "bad");
       const meta = E.fuente.metaDato ? E.fuente.metaDato(c) : { fuente: "", t: u.t };
       const edad = meta.t ? ahora - meta.t : 0, viejo = edad > (m.rapido ? 6 : 20);
       tile.classList.toggle("viejo", viejo);
-      tile.querySelector(".meta-dato").textContent = (fuera ? "⚠ fuera de rango · " : "") + (viejo ? "dato viejo · " : "") +
+      tile.querySelector(".meta-dato").textContent = (fuera ? "⚠ dato imposible (sensor o cable) · " : "") + (viejo ? "dato viejo · " : "") +
         `${meta.fuente || ""}${meta.t ? ` · hace ${Math.max(0, Math.round(edad))} s` : ""}`;
       if (!m.texto) dibujarLinea(tile.querySelector("canvas"), ultimos.map((x) => x[c]), COLORES[nivel]);
     }
@@ -337,7 +342,8 @@
     mil.classList.toggle("off", st.mil === false);
     const n = (l.codigos || []).length;
     $("#mil-texto").textContent = st.mil ? "Check engine ENCENDIDO" : st.mil === false ? "Check engine apagado" : "Estado desconocido";
-    $("#mil-detalle").textContent = (n ? `${n} código(s) encontrados` : "No hay códigos de falla guardados.") + (st.computadoras ? ` · Respondieron: ${st.computadoras.join(", ")}` : "");
+    $("#mil-detalle").textContent = (n ? `${n} código(s) encontrados` : "No hay códigos de falla guardados.") + (st.computadoras ? ` · Respondieron: ${st.computadoras.join(", ")}` : "") +
+      ((l.avisos || []).length ? " · " + l.avisos.join(" ") : "");
     $("#lista-codigos").innerHTML = (l.codigos || []).map((c) => `
       <div class="codigo ${esc(c.gravedad)}">
         <div class="num">${esc(c.codigo)}</div>
@@ -348,14 +354,14 @@
         ${c.nota ? `<div class="aviso">${esc(c.nota)}</div>` : ""}
       </div>`).join("");
     const ff = l.freeze_frame;
-    $("#freeze-frame").innerHTML = ff && ff.datos ? `<h3>Freeze frame de ${esc(ff.codigo)}</h3><p class="nota">Cómo estaba el carro cuando saltó la falla.</p>
+    $("#freeze-frame").innerHTML = ff && ff.datos ? `<h3>Freeze frame de ${esc(ff.codigo)}</h3><p class="nota">Cómo estaba el carro cuando saltó la falla${ff.con_mapa === false ? " (el carro no reporta qué datos guardó: se muestran los básicos)" : ""}.</p>
       <table class="mini">${Object.entries(ff.datos).map(([k, v]) => { const m = S.META[k] || { nombre: k }; const x = U.valorDato(k, v); return `<tr><td>${esc(m.nombre)}</td><td>${esc(x.texto)} ${esc(x.unidad)}</td></tr>`; }).join("")}</table>` : "";
     const mon = st.monitores || [];
     $("#monitores").innerHTML = mon.length ? `<h3>Monitores de emisiones</h3><p class="nota">Si alguno no está listo, se borraron códigos o se desconectó la batería hace poco.</p>` +
       mon.map((m) => `<div class="monitor"><span>${esc(m.nombre_es)}</span><span class="${m.completo ? "si" : "no"}">${m.completo ? "✓ listo" : "… pendiente"}</span></div>`).join("") : "";
     const ex = l.extras || {};
     $("#extras-lectura").innerHTML = Object.keys(ex).length ? `<h3>Otros datos de la computadora</h3><table class="mini">${Object.entries(ex).map(([k, v]) =>
-      `<tr><td>${esc(S.NOMBRES_EXTRAS[k] || k)}</td><td>${U.t(/km/.test(k) ? `${Math.round(v)} km` : Math.round(v))}</td></tr>`).join("")}</table>` : "";
+      `<tr><td>${esc(S.NOMBRES_EXTRAS[k] || k)}</td><td>${S.textoExtra(k, v) != null ? esc(S.textoExtra(k, v)) : U.t(/km/.test(k) ? `${Math.round(v)} km` : Math.round(v))}</td></tr>`).join("")}</table>` : "";
     U.emit("lectura");
   }
   U.mostrarLectura = mostrarLectura;
@@ -388,7 +394,7 @@
       await U.esperar(600);
       E.lectura = await E.fuente.leerTodo();
       mostrarLectura(E.lectura);
-      $("#mil-detalle").textContent = (ok ? "Códigos borrados. El escaneo anterior quedó guardado." : "El carro no confirmó el borrado. Probá con el motor apagado y la llave en ON.") +
+      $("#mil-detalle").textContent = (ok ? "Códigos borrados. El escaneo anterior quedó guardado." : `${(E.fuente.ultimoBorrado && E.fuente.ultimoBorrado.motivo) || "El carro no confirmó el borrado."} Probá con el motor apagado y la llave en ON.`) +
         " Si la falla sigue, el código va a volver.";
       actualizarAnalisis();
     } catch (e) { $("#mil-detalle").textContent = e.message; if (U.esErrorConexion(e)) conexionPerdida(e.message); }
@@ -403,21 +409,25 @@
     const prueba = h.prueba ? `<div class="bloque"><b>Prueba para confirmar${h.donde ? ` (${h.donde === "casa" ? "se puede en casa" : h.donde === "mecánico" ? "con mecánico" : "en casa o con mecánico"})` : ""}</b>${U.t(h.prueba)}</div>` : "";
     const esp = h.esperado ? `<div class="bloque"><b>Resultado esperado</b>${U.t(h.esperado)}</div>` : "";
     const nc = h.no_cambiar ? `<div class="bloque no-cambiar"><b>No cambiés todavía</b>${U.t(h.no_cambiar)}</div>` : "";
-    const detalle = causas + alt + prueba + esp + nc;
+    const dis = h.distinguir ? `<div class="bloque"><b>Lo que los datos no pueden separar</b>${U.t(h.distinguir)}</div>` : "";
+    const cond = h.condiciones ? `<div class="bloque"><b>Condiciones de la medición</b>${U.t(h.condiciones)}</div>` : "";
+    const ref = h.referencia ? `<div class="bloque"><b>Valores de referencia</b>${U.t(h.referencia)}</div>` : "";
+    const detalle = cond + ref + causas + alt + dis + prueba + esp + nc;
     return `<div class="hallazgo ${esc(h.gravedad)}">
       <div class="titulo"><span>${U.t(h.titulo)}</span><span class="chips">
-        ${h.certeza ? `<span class="chip ${esc(h.certeza)}" title="Qué tan seguro es">${esc(S.CERTEZAS[h.certeza])}</span>` : ""}
+        ${h.certeza ? `<span class="chip ${esc(h.certeza)}" title="Qué tan seguro es que la condición existe (no la causa)">${esc(S.CERTEZAS[h.certeza])}</span>` : ""}
         <span class="chip ${esc(h.gravedad)}">${esc(U.NOMBRE_GRAVEDAD[h.gravedad] || h.gravedad)}</span></span></div>
       <p>${U.t(h.detalle)}</p>
+      ${h.urgencia ? `<p class="urgencia-h ${esc(h.urgencia.nivel)}"><b>${esc(S.URGENCIAS[h.urgencia.nivel])}:</b> ${U.t(h.urgencia.texto)}</p>` : ""}
       ${(h.evidencia || []).length ? `<ul>${h.evidencia.map((e) => `<li>${U.t(e)}</li>`).join("")}</ul>` : ""}
-      ${detalle ? `<details${abierto ? " open" : ""}><summary>Causas, cómo confirmarlo y qué no cambiar</summary>${detalle}</details>` : ""}
+      ${detalle ? `<details${abierto ? " open" : ""}><summary>Condiciones, referencias, causas, cómo confirmarlo y qué no cambiar</summary>${detalle}</details>` : ""}
     </div>`;
   };
 
   function actualizarAnalisis() {
     const r = U.analizarAhora();
     const res = r.resumen;
-    $("#analisis-info").textContent = res.muestras ? `${res.muestras} lecturas analizadas (${Math.round(res.duracion_s)} s)${U.cilindrada() ? "" : " · Agregá la cilindrada del carro para revisar el sensor MAF"}.` :
+    $("#analisis-info").textContent = res.muestras ? `${res.muestras} lecturas analizadas (${Math.round(res.duracion_s)} s, ${res.hz ?? "?"} por segundo)${res.medicion ? ` · motor con ${res.medicion}` : ""}${U.cilindrada() || res.medicion !== "MAF" ? "" : " · Agregá la cilindrada del carro para revisar el sensor MAF"}.` :
       "Relaciona códigos, freeze frame, datos en vivo y pruebas internas. Cada hallazgo dice qué tan seguro es y cómo confirmarlo.";
     $("#hallazgos").innerHTML = r.hallazgos.map((h) => U.htmlHallazgo(h)).join("") || `<div class="vacio">Sin hallazgos todavía.</div>`;
     U.ultimoAnalisis = r;
@@ -489,13 +499,109 @@
   U.textoRegistro = textoRegistro;
 
   // ================================================================== inicio de esta parte
+  // ================================================================== adaptadores recordados
+  async function dibujarRecordados() {
+    const cont = $("#recordados");
+    const puertos = await S.TransporteSerial.recordados();
+    if (!puertos.length) { cont.innerHTML = ""; return; }
+    // Chrome no da el nombre de un puerto Bluetooth recordado: se numeran en el orden en que se autorizaron
+    cont.innerHTML = `<p class="nota">Adaptadores ya autorizados en este navegador (conectan sin elegir de la lista):</p>` + puertos.map((p, i) => {
+      const inf = (p.getInfo && p.getInfo()) || {};
+      const tipo = inf.bluetoothServiceClassId ? "Bluetooth" : inf.usbVendorId ? "USB" : "Serial";
+      return `<div class="fila-rec"><button class="btn" data-rec="${i}">Usar adaptador ${i + 1} (${tipo})</button><button class="btn chico" data-olvidar="${i}" title="Quitar el permiso">Olvidar</button></div>`;
+    }).join("");
+    cont.querySelectorAll("[data-rec]").forEach((b) => b.addEventListener("click", (e) => conectar("serial", e.currentTarget, new S.TransporteSerial(puertos[Number(b.dataset.rec)], Number(E.ajustes.baud) || 38400))));
+    cont.querySelectorAll("[data-olvidar]").forEach((b) => b.addEventListener("click", async () => {
+      if (await S.TransporteSerial.olvidar(puertos[Number(b.dataset.olvidar)])) { U.toast("Adaptador olvidado."); dibujarRecordados(); }
+      else U.toast("Este navegador no permite olvidar el permiso desde la app; quitalo en la configuración del sitio en Chrome.");
+    }));
+  }
+
+  // ================================================================== diagnóstico de conexión
+  function entornoNavegador() {
+    const ua = navigator.userAgent, chrome = (ua.match(/Chrome\/(\d+)/) || [])[1];
+    return { navegador: ua, version_chrome: chrome ? Number(chrome) : null, android: /Android/i.test(ua), contexto_seguro: window.isSecureContext,
+      web_serial: S.TransporteSerial.disponible(), web_bluetooth: S.TransporteBLE.disponible(), origen: location.origin || "archivo local" };
+  }
+  function textoDiagnostico(d) {
+    const L = [`ScanIA ${S.VERSION || ""} — diagnóstico de conexión (${d.fecha || new Date().toISOString()})`, ""];
+    const e = d.entorno;
+    L.push(`Navegador: ${e.navegador}`, `Chrome: ${e.version_chrome ?? "no es Chrome"} · Android: ${e.android ? "sí" : "no"} · contexto seguro: ${e.contexto_seguro ? "sí" : "NO"}`,
+      `Web Serial (Bluetooth clásico/USB): ${e.web_serial ? "sí" : "NO"} · Web Bluetooth (BLE): ${e.web_bluetooth ? "sí" : "NO"} · adaptadores recordados: ${e.recordados}`, "");
+    for (const p of d.pasos || []) L.push(`${p.ok ? "OK  " : "MAL "} ${p.nombre}: ${p.detalle}`);
+    if (d.velocidad) L.push("", `Velocidad: ${JSON.stringify(d.velocidad)}`);
+    if (d.estadisticas) L.push(`Estadísticas: ${JSON.stringify(d.estadisticas)}`);
+    if (d.transporte) L.push(`Puerto: ${JSON.stringify(d.transporte)}`);
+    if ((d.avisos || []).length) L.push("Avisos: " + d.avisos.join(" | "));
+    if ((d.negativas || []).length) L.push("Respuestas negativas: " + d.negativas.join(" | "));
+    if (d.nota_adaptador) L.push(d.nota_adaptador);
+    L.push("", "Registro técnico (últimas líneas, VIN tapado):", d.registro || "");
+    return L.join("\n");
+  }
+  async function diagnosticoConexion() {
+    const entorno = { ...entornoNavegador(), recordados: (await S.TransporteSerial.recordados()).length };
+    const consejos = [];
+    if (!entorno.contexto_seguro) consejos.push("Abrí ScanIA desde su enlace https:// (o el archivo ScanIA.html en la compu): sin eso el navegador no deja usar Bluetooth.");
+    if (!entorno.web_serial) consejos.push(entorno.android ? "Este Chrome no tiene Web Serial: actualizá Chrome a la versión 138 o más nueva. Si tu teléfono ya tiene Chrome actualizado y no aparece, el navegador no permite Bluetooth clásico: la alternativa sería una app nativa de Android que haga de puente (no incluida)." :
+      "Este navegador no tiene Web Serial: usá Google Chrome o Microsoft Edge actualizado en la compu.");
+    if (entorno.android && entorno.version_chrome && entorno.version_chrome < 138) consejos.push(`Chrome ${entorno.version_chrome} no conecta adaptadores Bluetooth clásicos; necesitás 138 o más nuevo.`);
+    U.modal(`<h2>Diagnóstico de conexión</h2><p class="nota">Prueba paso a paso del navegador, el adaptador y el carro. No manda nada que cambie el carro. Sirve para investigar problemas con un adaptador.</p>
+      <div id="dc-pasos" class="lista-simple"><p>Revisando…</p></div>
+      <div class="acciones"><button class="btn" id="dc-copiar" disabled>Copiar</button><button class="btn" id="dc-txt" disabled>Descargar .txt</button><button class="btn" id="dc-json" disabled>Descargar .json</button><button class="btn" id="dc-cerrar">Cerrar</button></div>`, async () => {
+      $("#dc-cerrar").onclick = U.cerrarModal;
+      let d = { fecha: new Date().toISOString(), entorno, pasos: [] };
+      const pintar = () => {
+        $("#dc-pasos").innerHTML = [
+          `<div class="punto-u ${entorno.web_serial ? "ok" : "mal"}"><span class="ic">${entorno.web_serial ? "✓" : "✗"}</span><div><b>Navegador:</b> Web Serial ${entorno.web_serial ? "sí" : "no"} · BLE ${entorno.web_bluetooth ? "sí" : "no"} · Chrome ${entorno.version_chrome ?? "?"}${entorno.contexto_seguro ? "" : " · SIN contexto seguro"}</div></div>`,
+          ...consejos.map((c) => `<div class="punto-u aviso"><span class="ic">!</span><div>${esc(c)}</div></div>`),
+          ...d.pasos.map((p) => `<div class="punto-u ${p.ok ? "ok" : "aviso"}"><span class="ic">${p.ok ? "✓" : "!"}</span><div><b>${esc(p.nombre)}:</b> ${esc(p.detalle)}</div></div>`),
+          !E.fuente ? `<p class="nota">No hay un adaptador conectado: conectate y volvé a abrir este diagnóstico para probar el adaptador y el carro.</p>` : "",
+        ].join("");
+      };
+      pintar();
+      if (E.fuente) {
+        E.pausado = true;
+        try { d = { ...(await E.fuente.diagnosticoConexion({ lecturas: 15 })), entorno }; }
+        catch (e) { d.pasos.push({ nombre: "Error", ok: false, detalle: e.message }); }
+        finally { E.pausado = false; }
+        d.registro = U.textoRegistro().split("\n").slice(-80).join("\n").replace(/\b[A-HJ-NPR-Z0-9]{11}([A-HJ-NPR-Z0-9]{6})\b/g, "***********$1");
+        pintar();
+      }
+      const txt = textoDiagnostico(d);
+      for (const id of ["#dc-copiar", "#dc-txt", "#dc-json"]) $(id).disabled = false;
+      $("#dc-copiar").onclick = async () => { try { await navigator.clipboard.writeText(txt); U.toast("Copiado.", "ok"); } catch (e) { U.toast("No se pudo copiar; descargalo."); } };
+      $("#dc-txt").onclick = () => U.descargar(`scania-diagnostico-conexion-${d.fecha.slice(0, 16).replace(/[:T]/g, "-")}.txt`, txt, "text/plain");
+      $("#dc-json").onclick = () => U.descargar(`scania-diagnostico-conexion-${d.fecha.slice(0, 16).replace(/[:T]/g, "-")}.json`, JSON.stringify(d, null, 2));
+    });
+  }
+
+  // ================================================================== síntomas (análisis local)
+  function dibujarSintomas() {
+    $("#sintomas-lista").innerHTML = S.SINTOMAS.map((x) => `<label class="check"><input type="checkbox" data-sintoma="${esc(x.id)}"${E.sintomas.includes(x.id) ? " checked" : ""}> ${esc(x.texto)}</label>`).join("");
+    $$("#sintomas-lista [data-sintoma]").forEach((c) => c.addEventListener("change", () => {
+      E.sintomas = $$("#sintomas-lista [data-sintoma]:checked").map((x) => x.dataset.sintoma);
+      actualizarAnalisis();
+    }));
+  }
+
   U.on("init", async () => {
-    const sel = $("#sel-escenario");
+    const sel = $("#sel-escenario"), selP = $("#sel-perfil-sim");
+    selP.innerHTML = Object.entries(S.PERFILES_SIM).map(([id, p]) => `<option value="${esc(id)}">${esc(p.nombre)}</option>`).join("");
     const grupos = { vehiculo: "Fallas del carro", protocolo: "Fallas del adaptador" };
-    sel.innerHTML = Object.entries(grupos).map(([g, n]) => `<optgroup label="${n}">${Object.entries(S.ESCENARIOS).filter(([, e]) => e.grupo === g)
-      .map(([id, e]) => `<option value="${esc(id)}">${esc(e.nombre)}</option>`).join("")}</optgroup>`).join("");
-    const desc = () => { $("#desc-escenario").textContent = S.ESCENARIOS[sel.value].descripcion; };
-    sel.addEventListener("change", desc); desc();
+    const llenarEscenarios = () => {
+      const noAplica = S.PERFILES_SIM[selP.value].noAplica || [];
+      const previo = sel.value;
+      sel.innerHTML = Object.entries(grupos).map(([g, n]) => `<optgroup label="${n}">${Object.entries(S.ESCENARIOS).filter(([id, e]) => e.grupo === g && !noAplica.includes(id))
+        .map(([id, e]) => `<option value="${esc(id)}">${esc(e.nombre)}</option>`).join("")}</optgroup>`).join("");
+      if (previo && sel.querySelector(`option[value="${previo}"]`)) sel.value = previo;
+      desc();
+    };
+    const desc = () => { $("#desc-escenario").textContent = (S.ESCENARIOS[sel.value] || {}).descripcion || ""; };
+    sel.addEventListener("change", desc);
+    selP.addEventListener("change", llenarEscenarios);
+    llenarEscenarios();
+    dibujarSintomas();
+    $("#btn-diag-conexion").addEventListener("click", diagnosticoConexion);
 
     $$(".pestana").forEach((b) => b.addEventListener("click", () => {
       E.modo = b.dataset.modo;
@@ -509,7 +615,7 @@
     $("#btn-reconectar").addEventListener("click", (e) => {
       const u = E.ultimaConexion;
       if (!u) return;
-      const t = u.tipo === "simulador" ? new S.TransporteVirtual(u.transporte.escenario)
+      const t = u.tipo === "simulador" ? new S.TransporteVirtual(u.transporte.escenario, { perfil: u.transporte.perfil })
         : u.tipo === "ble" ? new S.TransporteBLE(u.transporte.dispositivo) : new S.TransporteSerial(u.transporte.puerto, Number(E.ajustes.baud) || 38400);
       conectar(u.tipo, e.currentTarget, t);
     });
@@ -529,13 +635,8 @@
     else if (!serial && !ble) aviso.textContent = "Este navegador no puede conectarse a adaptadores Bluetooth. Usá Google Chrome actualizado (Android 138+) o Chrome/Edge en la compu. Podés probar el simulador.";
     else if (!serial) aviso.textContent = "Este navegador no soporta Bluetooth clásico (el ELM327 común). Actualizá Chrome a la versión 138 o más nueva. Solo vas a poder usar adaptadores BLE.";
     if (aviso.textContent) { aviso.classList.remove("oculto"); $("#btn-conectar-bt").disabled = !serial; }
-    // Adaptador ya autorizado antes: se puede conectar sin elegir de la lista
-    const puertos = await S.TransporteSerial.recordados();
-    if (puertos.length) {
-      const b = $("#btn-conectar-recordado");
-      b.classList.remove("oculto");
-      b.addEventListener("click", (e) => conectar("serial", e.currentTarget, new S.TransporteSerial(puertos[0], Number(E.ajustes.baud) || 38400)));
-    }
+    // Adaptadores ya autorizados antes: se puede conectar sin elegir de la lista (y elegir cuál, si hay dos)
+    await dibujarRecordados();
     ponerConectado(false);
     $("#hallazgos").innerHTML = `<div class="vacio">Sin datos todavía.</div>`;
     setInterval(() => { if (E.conectado) actualizarAnalisis(); }, 10000);
