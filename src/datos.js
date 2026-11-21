@@ -25,11 +25,6 @@
     { clave: "ltft2", pid: 0x09, n: 1, nombre: "Ajuste largo B2 (LTFT)", unidad: "%", dec: 1, f: (a) => ((a - 128) * 100) / 128 },
     { clave: "maf", pid: 0x10, n: 2, nombre: "Flujo de aire (MAF)", unidad: "g/s", dec: 1, rapido: true, f: (a, b) => w(a, b) / 100 },
     { clave: "map", pid: 0x0b, n: 1, nombre: "Presión de admisión (MAP)", unidad: "kPa", dec: 0, rapido: true, f: (a) => a },
-    { clave: "o2_b1s1", pid: 0x14, n: 2, nombre: "Sensor O2 antes (B1S1)", unidad: "V", dec: 2, rapido: true, f: (a) => a / 200 },
-    { clave: "o2_b1s2", pid: 0x15, n: 2, nombre: "Sensor O2 después (B1S2)", unidad: "V", dec: 2, rapido: true, f: (a) => a / 200 },
-    { clave: "lambda_b1s1", pid: 0x34, n: 4, nombre: "Sensor A/F antes (λ)", unidad: "λ", dec: 3, rapido: true, f: (a, b) => (2 * w(a, b)) / 65536 },
-    { clave: "af_corriente", pid: 0x34, n: 4, nombre: "Sensor A/F corriente", unidad: "mA", dec: 2, rapido: true, f: (a, b, c, d) => w(c, d) / 256 - 128 },
-    { clave: "lambda_b1s1", pid: 0x24, n: 4, nombre: "Sensor A/F antes (λ)", unidad: "λ", dec: 3, rapido: true, alterno: true, f: (a, b) => (2 * w(a, b)) / 65536 },
     { clave: "lambda_comandado", pid: 0x44, n: 2, nombre: "Mezcla pedida (λ)", unidad: "λ", dec: 3, f: (a, b) => (2 * w(a, b)) / 65536 },
     { clave: "avance", pid: 0x0e, n: 1, nombre: "Avance de encendido", unidad: "°", dec: 1, rapido: true, f: (a) => a / 2 - 64 },
     { clave: "voltaje", pid: 0x42, n: 2, nombre: "Voltaje del sistema", unidad: "V", dec: 2, f: (a, b) => w(a, b) / 1000 },
@@ -48,16 +43,81 @@
     { clave: "bateria_hibrida", pid: 0x5b, n: 1, nombre: "Batería híbrida", unidad: "%", dec: 0, f: (a) => (a * 100) / 255 },
     { clave: "combustible", pid: 0x2f, n: 1, nombre: "Nivel de combustible", unidad: "%", dec: 0, f: (a) => (a * 100) / 255 },
     { clave: "tiempo_motor", pid: 0x1f, n: 2, nombre: "Tiempo motor encendido", unidad: "s", dec: 0, f: (a, b) => w(a, b) },
+    { clave: "presion_riel_vacio", pid: 0x22, n: 2, nombre: "Presión del riel (relativa al vacío)", unidad: "kPa", dec: 0, f: (a, b) => w(a, b) * 0.079 },
+    { clave: "egr_error", pid: 0x2d, n: 1, nombre: "Error de la EGR", unidad: "%", dec: 0, f: (a) => (a * 100) / 128 - 100 },
+    { clave: "evap_presion", pid: 0x32, n: 2, nombre: "Presión de vapores EVAP", unidad: "Pa", dec: 0, f: (a, b) => { const v = w(a, b); return (v > 32767 ? v - 65536 : v) / 4; } },
+    { clave: "temp_cat_b2s1", pid: 0x3d, n: 2, nombre: "Temp. catalizador B2", unidad: "°C", dec: 0, f: (a, b) => w(a, b) / 10 - 40 },
+    { clave: "acel_relativo", pid: 0x45, n: 1, nombre: "Acelerador relativo", unidad: "%", dec: 0, f: (a) => (a * 100) / 255 },
   ];
+
+  // ------------------------------------------------------------------ sensores de oxígeno
+  // Hay dos mapas de ubicación (SAE J1979): PID 13 (2 bancos × 4 sensores) o PID 1D (4 bancos × 2 sensores).
+  // El sensor número i (0–7) se lee en los PIDs 14+i (voltaje y ajuste), 24+i (λ y voltaje) o 34+i (λ y corriente),
+  // pero su banco y posición dependen del mapa que use el carro.
+  S.ubicacionO2 = function (mapa, i) {
+    return mapa === "1D" ? { banco: (i >> 1) + 1, sensor: (i & 1) + 1 } : { banco: (i >> 2) + 1, sensor: (i & 3) + 1 };
+  };
+  const nombreSensor = (u) => `B${u.banco}S${u.sensor}`;
+  const posicion = (u) => (u.sensor === 1 ? "antes del catalizador" : u.sensor === 2 ? "después del catalizador" : `posición ${u.sensor}`);
+  /**
+   * Entradas de sensores O2 para un carro. mapa: "13" | "1D" | null (si el carro no lo reporta se usa el de 13).
+   * presentes: índices (0–7) de los sensores que el carro dice tener; si no se sabe, todos.
+   */
+  S.entradasO2 = function (mapa, presentes) {
+    const out = [];
+    for (let i = 0; i < 8; i++) {
+      if (presentes && !presentes.includes(i)) continue;
+      const u = S.ubicacionO2(mapa, i), id = nombreSensor(u).toLowerCase(), nom = nombreSensor(u), pos = posicion(u);
+      out.push(
+        { clave: `o2_${id}`, pid: 0x14 + i, n: 2, nombre: `Sensor O2 ${nom} (${pos})`, unidad: "V", dec: 3, rapido: u.sensor <= 2, o2: { ...u, tipo: "voltaje" },
+          f: (a) => a / 200 },
+        { clave: `o2_${id}_trim`, pid: 0x14 + i, n: 2, nombre: `Ajuste corto del sensor ${nom}`, unidad: "%", dec: 1, rapido: false, o2: { ...u, tipo: "trim" },
+          f: (a, b) => (b === 0xff ? NaN : (b * 100) / 128 - 100) },   // FF = este sensor no se usa para el ajuste
+        { clave: `lambda_${id}`, pid: 0x24 + i, n: 4, nombre: `Sensor A/F ${nom} (λ)`, unidad: "λ", dec: 3, rapido: true, o2: { ...u, tipo: "lambda" },
+          f: (a, b) => (2 * w(a, b)) / 65536 },
+        { clave: `af_v_${id}`, pid: 0x24 + i, n: 4, nombre: `Sensor A/F ${nom} (voltaje)`, unidad: "V", dec: 3, rapido: false, o2: { ...u, tipo: "af_voltaje" },
+          f: (a, b, c, d) => (8 * w(c, d)) / 65536 },
+        { clave: `lambda_${id}`, pid: 0x34 + i, n: 4, nombre: `Sensor A/F ${nom} (λ)`, unidad: "λ", dec: 3, rapido: true, o2: { ...u, tipo: "lambda" },
+          f: (a, b) => (2 * w(a, b)) / 65536 },
+        { clave: `af_ma_${id}`, pid: 0x34 + i, n: 4, nombre: `Sensor A/F ${nom} (corriente)`, unidad: "mA", dec: 2, rapido: false, o2: { ...u, tipo: "af_corriente" },
+          f: (a, b, c, d) => w(c, d) / 256 - 128 },
+      );
+    }
+    return out;
+  };
+  /** Índices de sensores presentes según el byte del PID 13 o 1D (bit 0 = sensor 0). */
+  S.sensoresPresentes = (byte) => [0, 1, 2, 3, 4, 5, 6, 7].filter((i) => byte & (1 << i));
+
   // Largo de datos por PID (para separar respuestas de varios PIDs a la vez)
   S.LARGO_PID = {};
   for (const p of S.PIDS) S.LARGO_PID[p.pid] = p.n;
+  for (let i = 0; i < 8; i++) { S.LARGO_PID[0x14 + i] = 2; S.LARGO_PID[0x24 + i] = 4; S.LARGO_PID[0x34 + i] = 4; }
+  S.LARGO_PID[0x13] = 1; S.LARGO_PID[0x1d] = 1; S.LARGO_PID[0x1c] = 1; S.LARGO_PID[0x51] = 1;
   S.META = {};
-  for (const p of S.PIDS) if (!S.META[p.clave]) S.META[p.clave] = p;
+  for (const p of [...S.PIDS, ...S.entradasO2("13"), ...S.entradasO2("1D")]) if (!S.META[p.clave]) S.META[p.clave] = p;
+
+  /** Claves de los sensores O2 de un banco y posición (para el análisis). */
+  S.claveO2 = (tipo, banco, sensor) => `${tipo}_b${banco}s${sensor}`;
+
+  // ------------------------------------------------------------------ rangos físicos posibles
+  // Fuera de estos rangos el dato no es una medición real: sensor desconectado (−40 °C), en corto (215 °C),
+  // o valor de relleno del adaptador. Esos datos NO se usan para diagnosticar; se reportan como falla del sensor.
+  S.RANGOS_FISICOS = {
+    temp_motor: [-39, 135], temp_admision: [-39, 100], temp_aceite: [-39, 160], temp_ambiente: [-39, 70],
+    rpm: [0, 9500], maf: [0, 600], map: [5, 255], voltaje: [3, 20], baro: [50, 110],
+    o2: [0, 1.1], lambda: [0.5, 1.999], carga: [0, 100], acelerador: [0, 100],
+  };
+  S.rangoDe = (clave) => S.RANGOS_FISICOS[clave] || (/^o2_b\ds\d$/.test(clave) ? S.RANGOS_FISICOS.o2 : /^lambda_b\ds\d$/.test(clave) ? S.RANGOS_FISICOS.lambda : null);
+  S.valorPlausible = function (clave, v) {
+    if (v == null || !Number.isFinite(v)) return false;
+    const r = S.rangoDe(clave);
+    return !r || (v >= r[0] && v <= r[1]);
+  };
 
   // Datos que guarda el freeze frame (foto del momento de la falla)
+  // Lista de respaldo si el carro no reporta el mapa del freeze frame (02 00 00).
   S.PIDS_FREEZE_FRAME = ["rpm", "velocidad", "temp_motor", "carga", "stft1", "ltft1", "stft2", "ltft2",
-    "map", "maf", "acelerador", "temp_admision", "sistema_comb"];
+    "map", "maf", "acelerador", "temp_admision", "sistema_comb", "avance", "voltaje"];
 
   // Datos extra (modo 01)
   S.PIDS_EXTRAS = [
@@ -67,11 +127,24 @@
     { clave: "minutos_con_check_engine", pid: 0x4d, n: 2, f: (a, b) => w(a, b) },
     { clave: "minutos_desde_borrado", pid: 0x4e, n: 2, f: (a, b) => w(a, b) },
     { clave: "odometro_ecu_km", pid: 0xa6, n: 4, f: (a, b, c, d) => (a * 16777216 + b * 65536 + c * 256 + d) / 10 },
+    { clave: "norma_obd", pid: 0x1c, n: 1, f: (a) => a },
+    { clave: "tipo_combustible", pid: 0x51, n: 1, f: (a) => a },
   ];
+  // PID 1C: a qué norma responde la computadora (SAE J1979)
+  S.NORMAS_OBD = { 1: "OBD-II (California, CARB)", 2: "OBD (EPA, federal EE. UU.)", 3: "OBD y OBD-II", 4: "OBD-I", 5: "No cumple OBD", 6: "EOBD (Europa)",
+    7: "EOBD y OBD-II", 8: "EOBD y OBD", 9: "EOBD, OBD y OBD-II", 10: "JOBD (Japón)", 11: "JOBD y OBD-II", 12: "JOBD y EOBD", 13: "JOBD, EOBD y OBD-II" };
+  S.TIPOS_COMBUSTIBLE = { 1: "Gasolina", 2: "Metanol", 3: "Etanol", 4: "Diésel", 5: "GLP", 6: "GNC", 7: "Propano", 8: "Eléctrico" };
   S.NOMBRES_EXTRAS = {
     km_con_check_engine: "Km manejados con la luz encendida", calentamientos_desde_borrado: "Calentamientos desde el borrado",
     km_desde_borrado: "Km desde que se borraron los códigos", minutos_con_check_engine: "Minutos con la luz encendida",
     minutos_desde_borrado: "Minutos desde el borrado", odometro_ecu_km: "Odómetro según la computadora",
+    norma_obd: "Norma OBD que cumple la computadora", tipo_combustible: "Combustible según la computadora",
+  };
+  /** Texto de un dato extra (algunos son códigos, no números). */
+  S.textoExtra = function (clave, v) {
+    if (clave === "norma_obd") return S.NORMAS_OBD[v] || `Código ${v}`;
+    if (clave === "tipo_combustible") return S.TIPOS_COMBUSTIBLE[v] || `Código ${v}`;
+    return null;
   };
 
   /** PID 03: cómo está controlando la mezcla la computadora. */
@@ -222,6 +295,34 @@
         estandar: tid < 0x80, escala_conocida: !!UAS[uas], crudo: [v.crudo, mn.crudo, mx.crudo] });
     }
     return out;
+  };
+
+  /**
+   * Modo 06 en protocolos no CAN (ISO 9141-2, ISO 14230-4, SAE J1850), según SAE J1979:
+   *   46 TID TLTCID TVHI TVLO TLHI TLLO
+   * TLTCID: bit 7 = tipo de límite (0: el límite es MÁXIMO, falla si el valor es mayor; 1: es MÍNIMO, falla si es menor);
+   * bits 0–6 = componente (lo define el fabricante). Valor y límite: 0–65535 sin escala estándar.
+   */
+  S.pruebaNoCAN06 = function (datos) {
+    if (!datos || datos[0] !== 0x46 || datos.length < 7 || datos[1] === 0x00) return null;
+    const tid = datos[1], tl = datos[2], valor = w(datos[3], datos[4]), limite = w(datos[5], datos[6]);
+    const minimo = (tl & 0x80) !== 0;
+    const h = (n) => n.toString(16).toUpperCase().padStart(2, "0");
+    return {
+      tid, cid: tl & 0x7f, tipo_limite: minimo ? "min" : "max", valor, limite,
+      ok: minimo ? valor >= limite : valor <= limite,
+      nombre: `Prueba ${h(tid)} · componente ${h(tl & 0x7f)}`,
+      prueba: minimo ? `debe ser ≥ ${limite}` : `debe ser ≤ ${limite}`,
+      min: minimo ? limite : null, max: minimo ? null : limite, unidad: "", estandar: false, escala_conocida: false, no_can: true,
+      crudo: datos.slice(1, 7).map(h).join(" "),
+    };
+  };
+
+  /** Respuestas negativas (7F servicio código) más comunes en OBD. */
+  S.RESPUESTAS_NEGATIVAS = {
+    0x10: "rechazo general", 0x11: "la computadora no soporta ese servicio", 0x12: "la computadora no soporta ese dato",
+    0x21: "la computadora está ocupada, reintentar", 0x22: "condiciones incorrectas (por ejemplo, motor encendido al borrar códigos)",
+    0x31: "dato fuera de rango (no existe en este carro)", 0x78: "la computadora pidió más tiempo para responder",
   };
 
   // ------------------------------------------------------------------ códigos

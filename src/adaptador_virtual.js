@@ -19,7 +19,7 @@
     0x0e: (v) => [lim((v + 64) * 2, 0, 255)], 0x0f: (v) => [lim(v + 40, 0, 255)], 0x10: (v) => u16(v * 100), 0x11: pct,
     0x14: (v) => [lim(v * 200, 0, 255), 0xff], 0x15: (v) => [lim(v * 200, 0, 255), 0xff], 0x1f: (v) => u16(v), 0x2f: pct,
     0x33: (v) => [lim(v, 0, 255)], 0x42: (v) => u16(v * 1000), 0x46: (v) => [lim(v + 40, 0, 255)], 0x5c: (v) => [lim(v + 40, 0, 255)],
-    0x5e: (v) => u16(v * 20),
+    0x5e: (v) => u16(v * 20), 0x13: () => [0x03], 0x1c: () => [0x01],
   };
   const CLAVE_PID = {
     0x03: "sistema_comb", 0x04: "carga", 0x05: "temp_motor", 0x06: "stft1", 0x07: "ltft1", 0x0b: "map", 0x0c: "rpm", 0x0d: "velocidad",
@@ -30,6 +30,7 @@
     0x4e: "minutos_desde_borrado", 0xa6: "odometro_ecu_km" };
   const COD_EXTRA = { 0x30: (v) => [lim(v, 0, 255)], 0xa6: (v) => { const x = Math.round(v * 10); return [(x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, x & 255]; } };
 
+  const PIDS_SIEMPRE = [0x13, 0x1c];   // mapa de sensores O2 (B1S1 y B1S2) y norma OBD-II
   const PIDS_MOTOR = new Set([0x01, 0x02, ...Object.keys(CODIFICAR).map(Number), ...Object.keys(EXTRAS).map(Number)]);
   const UNIDAD_UAS = { V: [0x0b, 1000], "": [0x04, 1000], fallos: [0x24, 1], kPa: [0x17, 100], A: [0x0e, 1000], s: [0x10, 1000] };
 
@@ -50,6 +51,8 @@
       if (!this.config) throw new S.ErrorConexion("Escenario desconocido: " + escenario);
       this.falla = this.config.falla || null;
       this.modelo = opciones.modelo || new S.Simulador(escenario, opciones);
+      this.perfil = this.modelo.perfil || "moderno";
+      this.noCAN = this.perfil === "honda2000";
       this.alRecibir = () => {}; this.alCerrar = () => {};
       this.esSimulador = true;
       this.demora = opciones.demora ?? 8;
@@ -104,9 +107,10 @@
       if (/^S[01]$/.test(c)) { this.cfg.espacios = c[1] === "1"; return ["OK"]; }
       if (/^H[01]$/.test(c)) { this.cfg.encabezados = c[1] === "1"; return ["OK"]; }
       if (/^(L[01]|AT[012]|SP[0-9A-C]|ST[0-9A-F]{2}|SH[0-9A-F]+|CAF[01])$/.test(c)) return ["OK"];
-      if (c === "DPN") return [this.cfg.protocolo ? "A6" : "A0"];
-      if (c === "DP") return [this.cfg.protocolo ? "AUTO, ISO 15765-4 (CAN 11/500)" : "AUTO"];
+      if (c === "DPN") return [this.cfg.protocolo ? "A" + this.cfg.protocolo : "A0"];
+      if (c === "DP") return [!this.cfg.protocolo ? "AUTO" : this.noCAN ? "AUTO, ISO 9141-2" : "AUTO, ISO 15765-4 (CAN 11/500)"];
       if (c === "RV") return [`${(this.modelo.muestraSync().voltaje - 0.2).toFixed(1)}V`];
+      if (c === "@1") return ["SIMULADOR SCANIA"];
       return ["?"];
     }
 
@@ -137,11 +141,14 @@
     _obd(cmd) {
       if (!/^[0-9A-F]+$/.test(cmd) || cmd.length % 2) return ["?"];
       const b = []; for (let i = 0; i < cmd.length; i += 2) b.push(parseInt(cmd.slice(i, i + 2), 16));
+      let pre = [];
       if (!this.cfg.protocolo) {
         // Primera consulta: el adaptador busca el protocolo
         if (this.falla === "sin_carro") return ["SEARCHING...", "UNABLE TO CONNECT"];
-        this.cfg.protocolo = 6;
+        this.cfg.protocolo = this.noCAN ? 3 : 6;
+        pre = this.noCAN ? ["SEARCHING...", "BUS INIT: ...OK"] : ["SEARCHING..."];
       }
+      if (this.noCAN) return [...pre, ...this._noCAN(b)];
       const motor = this._motor(b);
       const tcm = this._transmision(b);
       if (!motor && !tcm) return ["NO DATA"];
@@ -153,15 +160,59 @@
         if (lineas.length > 1) lineas = lineas.slice(0, -1);
         else lineas = [lineas[0].slice(0, Math.max(4, Math.floor(lineas[0].length / 2)))];
       }
-      return lineas;
+      return [...pre, ...lineas];
+    }
+
+    /**
+     * Protocolo no CAN (ISO 9141-2): un PID por consulta, mensajes de hasta 7 bytes sin tramas ISO-TP,
+     * códigos en líneas de 3, sin VIN ni modo 0A, modo 06 en formato 46 TID TLTCID valor límite.
+     */
+    _noCAN(b) {
+      const h = (bs) => bs.map(hex2).join(this.cfg.espacios ? " " : "");
+      const modo = b[0];
+      let lineas = null;
+      if (modo === 0x01) {
+        if (b.length !== 2) return ["NO DATA"];               // estos protocolos no aceptan varios PIDs por consulta
+        const r = this._motor(b);
+        lineas = r ? [h(r)] : null;
+      } else if (modo === 0x03 || modo === 0x07) {
+        const r = this._motor(b);                                // [43, n, a, b, ...]
+        const cods = r.slice(2), out = [];
+        for (let i = 0; i < Math.max(cods.length, 1); i += 6) { const parte = cods.slice(i, i + 6); while (parte.length < 6) parte.push(0); out.push(h([0x40 + modo, ...parte])); }
+        lineas = out;
+      } else if (modo === 0x02 || modo === 0x04) {
+        const r = this._motor(b);
+        lineas = r ? [h(r)] : null;
+      } else if (modo === 0x06) {
+        lineas = this._modo06NoCAN(b[1]);
+      }
+      if (lineas && this.falla === "incompletas" && this.azar() < 0.15) lineas = [lineas[0].slice(0, Math.max(4, Math.floor(lineas[0].length / 2))) + " <DATA ERROR"];
+      return lineas && lineas.length ? lineas : ["NO DATA"];
+    }
+
+    _modo06NoCAN(tid) {
+      const r = this.modelo.pruebas06Sync();
+      // Las pruebas del simulador (sin misfire) se numeran como TID 01, 02, ... con componente 01. Es una simulación:
+      // no corresponde a la numeración real de ningún fabricante.
+      const lista = ((r && r.pruebas) || []).filter((p) => !(p.mid >= 0xa1 && p.mid <= 0xad));
+      if (tid === 0x00) {
+        const bits = [0, 0, 0, 0];
+        lista.forEach((_, i) => { if (i < 31) bits[i >> 3] |= 0x80 >> (i & 7); });
+        return [[0x46, 0x00, 0xff, ...bits].map(hex2).join(this.cfg.espacios ? " " : "")];
+      }
+      const p = lista[tid - 1];
+      if (!p) return null;
+      const esc = p.unidad === "V" || p.unidad === "s" || p.unidad === "kPa" || p.unidad === "A" || p.unidad === "" ? 1000 : 1;
+      const datos = [0x46, tid, 0x01, ...u16(p.valor * esc), ...u16(p.max * esc)];   // límite máximo (bit 7 = 0)
+      return [datos.map(hex2).join(this.cfg.espacios ? " " : "")];
     }
 
     _soportados() {
       const m = this.modelo;
-      const set = new Set([0x01, 0x02]);
+      const set = new Set([0x01, 0x02, ...PIDS_SIEMPRE]);
       const claves = new Set(m.pidsDisponibles());
       for (const [pid, clave] of Object.entries(CLAVE_PID)) if (claves.has(clave)) set.add(Number(pid));
-      for (const pid of Object.keys(EXTRAS)) set.add(Number(pid));
+      if (!this.noCAN) for (const pid of Object.keys(EXTRAS)) set.add(Number(pid));
       return set;
     }
 
@@ -185,6 +236,8 @@
           } else if (EXTRAS[pid]) {
             const v = todo.extras[EXTRAS[pid]] ?? 0;
             out.push(pid, ...(COD_EXTRA[pid] ? COD_EXTRA[pid](v) : u16(v)));
+          } else if (PIDS_SIEMPRE.includes(pid)) {
+            out.push(pid, ...CODIFICAR[pid]());
           } else if (CODIFICAR[pid]) {
             const v = muestra[CLAVE_PID[pid]];
             if (v == null) continue;
@@ -206,17 +259,24 @@
       }
       if (modo === 0x02) {
         const pid = b[1], todo = m.leerTodoSync(), ff = todo.freeze_frame;
+        if (pid % 0x20 === 0) {
+          if (!ff) return null;
+          const sop = this._soportados();
+          const guardados = new Set([0x02, ...Object.entries(CLAVE_PID).filter(([p, c]) => ff.datos[c] != null && sop.has(Number(p))).map(([p]) => Number(p))]);
+          return [0x42, pid, 0x00, ...mascara(guardados, pid)];
+        }
         if (pid === 0x02) {
           if (!ff) return [0x42, 0x02, 0x00, 0x00, 0x00];
           const c = ff.codigo, a = ("PCBU".indexOf(c[0]) << 6) | (parseInt(c[1], 16) << 4) | parseInt(c[2], 16);
           return [0x42, 0x02, 0x00, a, parseInt(c.slice(3), 16)];
         }
         const clave = CLAVE_PID[pid];
-        if (!ff || !clave || ff.datos[clave] == null) return null;
+        if (!ff || !clave || ff.datos[clave] == null || !this._soportados().has(pid)) return null;
         return [0x42, pid, 0x00, ...CODIFICAR[pid](ff.datos[clave])];
       }
       if (modo === 0x04) { m.borrarCodigos(); return [0x44]; }
       if (modo === 0x06) return this._modo06(b[1]);
+      if (modo === 0x09 && this.noCAN) return null;
       if (modo === 0x09) {
         const pid = b[1], ascii = (t) => [...t].map((c) => c.charCodeAt(0));
         if (pid === 0x02) return [0x49, 0x02, 0x01, ...ascii(m.info().vin)];

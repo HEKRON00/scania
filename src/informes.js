@@ -114,10 +114,12 @@
     } else add("VIN de la computadora", "sin_dato", "La computadora no reportó el VIN (común en carros anteriores a ~2005).");
 
     if (ex.odometro_ecu_km != null) {
-      const km = Number(declarado.km);
+      // El tablero de un carro importado de EE. UU. marca millas: se convierte antes de comparar
+      const enMillas = declarado.unidad === "mi";
+      const km = Number(declarado.km) ? Number(declarado.km) * (enMillas ? 1.609344 : 1) : 0;
       if (km) {
         const dif = Math.abs(ex.odometro_ecu_km - km) / Math.max(km, 1);
-        add("Kilometraje", dif > 0.05 ? "mal" : "ok", `Computadora: ${Math.round(ex.odometro_ecu_km).toLocaleString("es-HN")} km · tablero declarado: ${km.toLocaleString("es-HN")} km` +
+        add("Kilometraje", dif > 0.05 ? "mal" : "ok", `Computadora: ${Math.round(ex.odometro_ecu_km).toLocaleString("es-HN")} km · tablero declarado: ${Math.round(km).toLocaleString("es-HN")} km` + (enMillas ? ` (${Number(declarado.km).toLocaleString("es-HN")} millas)` : "") +
           (dif > 0.05 ? ". La diferencia es grande: posible tablero cambiado o manipulado. Preguntá." : "."));
       } else add("Kilometraje", "ok", `La computadora reporta ${Math.round(ex.odometro_ecu_km).toLocaleString("es-HN")} km. Comparalo con el tablero.`);
     } else add("Kilometraje", "sin_dato", "Este carro no reporta el odómetro por OBD2 (solo algunos modelos recientes lo hacen).");
@@ -129,11 +131,13 @@
       if ((pruebas06.misfire || []).length) add("Fallos de encendido", mis.length ? "aviso" : "ok", mis.length ? `Cilindro(s) con fallos: ${mis.map((c) => c.cilindro).join(", ")}.` : "Sin fallos de encendido relevantes por cilindro.");
     } else add("Pruebas internas (modo 06)", "sin_dato", (pruebas06 && pruebas06.motivo) || "No se leyeron.");
 
-    if (resumen && resumen.general && resumen.general.voltaje) {
-      const v = resumen.general.voltaje.prom;
-      const enc = resumen.motor_encendido;
-      const ok = enc ? v >= 13.2 && v <= 14.9 : v >= 12.3;
-      add("Sistema eléctrico", ok ? "ok" : "aviso", `${v.toFixed(2)} V con el motor ${enc ? "encendido" : "apagado"}. ${ok ? "Normal." : "Fuera de lo normal: hacé las pruebas de batería y alternador."}`);
+    if (resumen && (resumen.voltaje_encendido || resumen.voltaje_apagado)) {
+      // Se evalúa cada estado por separado (motor encendido vs llave en ON con motor apagado)
+      const ve = resumen.voltaje_encendido, va = resumen.voltaje_apagado, partes = [];
+      let ok = true;
+      if (ve) { const b = ve.prom >= 13.0 && ve.prom <= 15.0; ok = ok && b; partes.push(`${ve.prom.toFixed(2)} V con el motor encendido${b ? "" : " (fuera de lo típico)"}`); }
+      if (va) { const b = va.prom >= 12.2; ok = ok && b; partes.push(`${va.prom.toFixed(2)} V con el motor apagado${b ? "" : " (batería baja)"}`); }
+      add("Sistema eléctrico", ok ? "ok" : "aviso", `${partes.join(" · ")}. ${ok ? "Normal." : "Hacé las pruebas de batería y alternador."} (Medido en el conector OBD.)`);
     }
     const mal = p.filter((x) => x.estado === "mal").length, aviso = p.filter((x) => x.estado === "aviso").length;
     return {

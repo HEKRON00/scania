@@ -7,6 +7,18 @@
   const CICLO = 70;
   const PIDS_SIM = ["rpm", "velocidad", "temp_motor", "temp_admision", "carga", "acelerador", "sistema_comb", "stft1", "ltft1", "maf", "map",
     "o2_b1s1", "o2_b1s2", "avance", "voltaje", "temp_aceite", "temp_ambiente", "baro", "consumo", "combustible", "tiempo_motor"];
+  /**
+   * Perfiles de carro simulado. Son SIMULACIONES: no representan las respuestas reales de ningún modelo.
+   *  moderno   -> CAN 11 bits, sensor MAF, voltaje por PID 42, modo 06 CAN
+   *  honda2000 -> ISO 9141-2, sin MAF (motor con sensor MAP), voltaje solo por ATRV, sin VIN por OBD, modo 06 formato no CAN
+   */
+  S.PERFILES_SIM = {
+    moderno: { nombre: "Carro moderno simulado (CAN, sensor MAF)", protocolo: "6", cilindrada: 1.8,
+      pids: PIDS_SIM },
+    honda2000: { nombre: "Honda 2000 simulado (ISO 9141-2, sensor MAP)", protocolo: "3", cilindrada: 2.0, sinMAF: true, sinVIN: true,
+      pids: ["rpm", "velocidad", "temp_motor", "temp_admision", "carga", "acelerador", "sistema_comb", "stft1", "ltft1", "map", "o2_b1s1", "o2_b1s2", "avance"],
+      noAplica: ["maf_sucio"] },
+  };
 
   const ff = (codigo, d) => ({ codigo, datos: d });
   S.ESCENARIOS = {
@@ -70,8 +82,10 @@
   }
 
   class Simulador {
-    constructor(escenario = "normal", { reloj = () => Date.now() / 1000, semilla = null } = {}) {
+    constructor(escenario = "normal", { reloj = () => Date.now() / 1000, semilla = null, perfil = "moderno" } = {}) {
       if (!S.ESCENARIOS[escenario]) throw new Error("Escenario desconocido: " + escenario);
+      this.perfil = S.PERFILES_SIM[perfil] ? perfil : "moderno";
+      this.p = S.PERFILES_SIM[this.perfil];
       this.tipo = "simulador";
       this.escenario = escenario;
       this.config = S.ESCENARIOS[escenario];
@@ -86,20 +100,20 @@
     async conectar() { this.inicio = this.reloj(); this._conectado = true; }
     async desconectar() { this._conectado = false; }
     conectado() { return this._conectado; }
-    pidsDisponibles() { return PIDS_SIM.slice(); }
+    pidsDisponibles() { return this.p.pids.slice(); }
     info() {
-      return { tipo: "simulador", puerto: "simulador", protocolo: "Simulado (ISO 15765-4 CAN 11/500)", elm: "Simulador ScanIA",
-        vin: "9SCANA0SMVL000001", calibracion: "SIMCAL-0001", computadora: "ECM-Simulado", lectura_rapida: true,
-        escenario: this.escenario, escenario_nombre: this.config.nombre, pids: this.pidsDisponibles() };
+      return { tipo: "simulador", puerto: "simulador", protocolo: this.perfil === "honda2000" ? "Simulado (ISO 9141-2)" : "Simulado (ISO 15765-4 CAN 11/500)", elm: "Simulador ScanIA",
+        vin: this.p.sinVIN ? null : "9SCANA0SMVL000001", calibracion: "SIMCAL-0001", computadora: "ECM-Simulado", lectura_rapida: !this.p.sinVIN,
+        escenario: this.escenario, escenario_nombre: this.config.nombre, perfil: this.perfil, pids: this.pidsDisponibles() };
     }
-    /** Eventos para las pruebas guiadas: apagar, arranque, cargas, cargas_off. */
+    /** Eventos para las pruebas guiadas: apagar, arranque, cargas, cargas_off, ventilador (simula que el electroventilador encendió). */
     simularEvento(tipo) {
       const t = this._t();
       if (tipo === "apagar") this.motorApagado = true;
       else if (tipo === "arranque") { this.motorApagado = false; this.arranqueEn = t; }
       else if (tipo === "cargas") this.cargas = true;
       else if (tipo === "cargas_off") this.cargas = false;
-      else if (tipo === "a_fondo") this.aFondoEn = t + 2;   // acelerador a fondo durante 10 s (prueba de respiración)
+      else if (tipo === "frio") this.frioEn = t;   // motor recién encendido en frío (prueba de calentamiento)
     }
     async voltajeRapido() { return this.muestraSync().voltaje; }
     async leerPid(clave) { return this.muestraSync()[clave] ?? null; }
@@ -131,10 +145,13 @@
         // Llave en ON con motor apagado, o dando arranque
         const dando = this.arranqueEn != null && t - this.arranqueEn < 2.5 && t - this.arranqueEn > 0.4;
         const v = dando ? 10.3 + r.gauss(0, 0.15) : 12.55 + r.gauss(0, 0.02);
-        return { t: this.reloj(), rpm: dando ? 220 + r.gauss(0, 20) : 0, velocidad: 0, temp_motor: 88, temp_admision: 34, carga: 0, acelerador: 14,
+        const sop = new Set(this.p.pids);
+        const apagado = { t: this.reloj(), rpm: dando ? 220 + r.gauss(0, 20) : 0, velocidad: 0, temp_motor: 88, temp_admision: 34, carga: 0, acelerador: 14,
           sistema_comb: 0, stft1: 0, ltft1: 2.3, maf: dando ? 1.2 : 0, map: dando ? 80 : 97, o2_b1s1: 0.45, o2_b1s2: 0.45, avance: 0,
           voltaje: Math.round(v * 1000) / 1000, temp_aceite: 92, temp_ambiente: 30, baro: 97, consumo: 0, combustible: Math.round(this.combustible),
           tiempo_motor: 0 };
+        for (const k of Object.keys(apagado)) if (k !== "t" && k !== "voltaje" && !sop.has(k)) delete apagado[k];
+        return apagado;
       }
       const [nombreFase, b] = fase(t % CICLO);
       const ralenti = nombreFase === "ralenti";
@@ -145,23 +162,25 @@
       let maf = Math.max(0.5, b.maf + r.gauss(0, 0.3));
       const avance = b.avance + r.gauss(0, 1);
       let acelerador = b.acelerador + r.gauss(0, 0.4);
-      const aFondo = this.aFondoEn != null && t >= this.aFondoEn && t - this.aFondoEn < 10;
-      if (aFondo) {
-        // Acelerador a fondo en 2da/3ra: el motor sano "respira" ~86% de su cilindrada
-        const f = (t - this.aFondoEn) / 10;
-        rpm = 2400 + 2600 * f + r.gauss(0, 15); velocidad = 45 + 45 * f; carga = 95 + r.gauss(0, 1); map = 95 + r.gauss(0, 0.5); acelerador = 93;
-        const dens = (map * 1000) / (287.05 * (34 + 273.15));
-        maf = 0.86 * 1.8 * (rpm / 120) * dens + r.gauss(0, 0.5);
-      }
 
       const objetivo = esc === "termostato" ? 69 : 90;
       let temp = objetivo - 14 * Math.exp(-t / 25);
+      if (this.frioEn != null) {
+        // Arranque en frío: sube desde 28 °C; con termostato sano se estabiliza en ~90 °C, abierto se queda en ~69 °C
+        const tf = t - this.frioEn;
+        temp = esc === "termostato" ? 28 + (objetivo - 28) * (1 - Math.exp(-tf / 160)) : Math.min(objetivo, 28 + tf * 0.12);
+      }
       if (esc === "sobrecalentamiento") temp = Math.min(115, 98 + t * 0.15);
       temp += r.gauss(0, 0.4);
       const tempAdm = 34 + (esc === "sobrecalentamiento" ? 8 : 0) + r.gauss(0, 0.5);
 
       let ltft = 2.3, stft = r.gauss(0, 2.2);
-      if (esc === "fuga_vacio") {
+      if (esc === "fuga_vacio" && this.p.sinMAF) {
+        // Motor con sensor MAP: el aire de la fuga sí se "ve" en la presión del múltiple. La mezcla casi no cambia;
+        // lo que cambia es el vacío en ralentí (MAP alta) y el ralentí (alto e inestable).
+        ltft = 4.5; stft = r.gauss(1.5, 2);
+        if (ralenti) { map += 17; rpm += 150 + r.gauss(0, 35); }
+      } else if (esc === "fuga_vacio") {
         ltft = 15.6;
         stft = ralenti ? 11.5 + r.gauss(0, 1.8) : nombreFase === "crucero" ? -8.5 + r.gauss(0, 1.8) : 2 + r.gauss(0, 3);
         if (ralenti) { map += 6; maf -= 0.7; rpm += 40; }
@@ -197,7 +216,8 @@
         sistema_comb: nombreFase === "frenando" ? 4 : esc === "datos_contradictorios" || temp >= 40 ? 2 : 1,
         temp_aceite: (esc === "datos_contradictorios" ? 96 : temp + 6) + r.gauss(0, 0.3), temp_ambiente: 30, baro: 97, consumo: (maf / 14.7) * 3600 / 740 };
       const out = { t: this.reloj() };
-      for (const k in d) out[k] = Math.round(d[k] * 1000) / 1000;
+      const sop = new Set(this.p.pids);
+      for (const k in d) if (sop.has(k) || k === "voltaje") out[k] = Math.round(d[k] * 1000) / 1000;
       return out;
     }
     async muestra() { return this.muestraSync(); }

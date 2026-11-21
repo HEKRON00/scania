@@ -14,7 +14,13 @@
   }
   function escribir(clave, valor) {
     memoria[clave] = valor;
-    try { raiz.localStorage.setItem(clave, JSON.stringify(valor)); return true; } catch (e) { return false; }
+    try { raiz.localStorage.setItem(clave, JSON.stringify(valor)); return true; }
+    catch (e) {
+      // El dato queda solo en memoria (se pierde al cerrar): se avisa en vez de fallar en silencio
+      const info = { clave, fecha: Date.now() / 1000, mensaje: e && e.name === "QuotaExceededError" ? "El almacenamiento del navegador está lleno." : "El navegador no permitió guardar (modo privado o almacenamiento bloqueado)." };
+      if (S.almacen) { S.almacen.ultimoError = info; if (typeof S.almacen.alFallar === "function") { try { S.almacen.alFallar(info); } catch (x) { /* nada */ } } }
+      return false;
+    }
   }
   const nuevoId = (lista) => (lista.reduce((m, d) => Math.max(m, d.id || 0), 0) || 0) + 1;
 
@@ -36,6 +42,19 @@
 
   S.almacen = {
     leer, escribir,
+    ultimoError: null,
+    alFallar: null,
+    /** Espacio usado por ScanIA en el navegador (aproximado, en KB). */
+    uso() {
+      let bytes = 0;
+      try {
+        for (let i = 0; i < raiz.localStorage.length; i++) {
+          const k = raiz.localStorage.key(i);
+          if (k && k.startsWith("scania-")) bytes += (k.length + (raiz.localStorage.getItem(k) || "").length) * 2;
+        }
+      } catch (e) { for (const [k, v] of Object.entries(memoria)) bytes += (k.length + JSON.stringify(v).length) * 2; }
+      return Math.round(bytes / 1024);
+    },
     ajustes() {
       const a = { servidor: "", codigo: "", modelo: "claude-sonnet-5-5", baud: 38400, pantalla: true, buscarWeb: true, voz: true,
         compartirVIN: false, decodificarVIN: false, unidades: { ...(S.UNIDADES_POR_DEFECTO || {}) }, ...leer("scania-ajustes", {}) };

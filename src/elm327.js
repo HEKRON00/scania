@@ -3,7 +3,8 @@
  *  TransporteSerial -> Bluetooth clásico (el ELM327 azul/negro común) y USB, con Web Serial.
  *                      Android: Chrome 138 o más nuevo. Laptop: Chrome o Edge.
  *  TransporteBLE    -> adaptadores Bluetooth 4.0 / BLE, con Web Bluetooth.
- *  ELM327           -> habla el protocolo del adaptador y del OBD2 (modos 01, 02, 03, 04, 07, 09, 0A).
+ *  ELM327           -> habla el protocolo del adaptador y del OBD2 (modos 01, 02, 03, 04, 06, 07, 09, 0A).
+ *  Nunca hay dos comandos en vuelo: todo pasa por una cola (el ELM327 no acepta comandos simultáneos).
  */
 (function (raiz) {
   const S = (raiz.ScanIA = raiz.ScanIA || {});
@@ -57,23 +58,32 @@
         }
       }
       this._activo = true;
+      // Chrome avisa cuando el dispositivo Bluetooth/USB desaparece
+      if (navigator.serial && navigator.serial.addEventListener && !this._oyente) {
+        this._oyente = (e) => { if (e.target === this.puerto && this._activo) { this._activo = false; this.alCerrar(new Error("dispositivo desconectado")); } };
+        navigator.serial.addEventListener("disconnect", this._oyente);
+      }
       this._bucle();
     }
     async _bucle() {
-      while (this._activo && this.puerto.readable) {
+      let terminado = false;
+      while (this._activo && this.puerto.readable && !terminado) {
         this._lector = this.puerto.readable.getReader();
         try {
           for (;;) {
             const { value, done } = await this._lector.read();
-            if (done) break;
+            if (done) { terminado = true; break; }   // el flujo se cerró: no se vuelve a leer en bucle
             if (value) this.alRecibir(this._dec.decode(value, { stream: true }));
           }
         } catch (e) {
-          if (this._activo) { this._activo = false; this.alCerrar(e); }
+          // Errores no fatales (por ejemplo, desborde del búfer) dejan un flujo nuevo en puerto.readable: se sigue leyendo
+          if (this._activo && !this.puerto.readable) { this._activo = false; this.alCerrar(e); }
         } finally {
           try { this._lector.releaseLock(); } catch (e) { /* nada */ }
         }
       }
+      // El flujo terminó sin error (por ejemplo, el adaptador se apagó): también es una desconexión
+      if (this._activo) { this._activo = false; this.alCerrar(new Error("el adaptador cerró la conexión")); }
     }
     async escribir(texto) {
       const w = this.puerto.writable.getWriter();
@@ -81,9 +91,18 @@
     }
     async cerrar() {
       this._activo = false;
+      if (this._oyente && navigator.serial) { navigator.serial.removeEventListener("disconnect", this._oyente); this._oyente = null; }
       try { if (this._lector) await this._lector.cancel(); } catch (e) { /* nada */ }
       try { await this.puerto.close(); } catch (e) { /* nada */ }
     }
+    /** Datos técnicos del puerto para el diagnóstico de conexión. */
+    detalle() {
+      const i = (this.puerto.getInfo && this.puerto.getInfo()) || {};
+      return { tipo: "Web Serial", bluetoothServiceClassId: i.bluetoothServiceClassId || null, usbVendorId: i.usbVendorId ?? null, usbProductId: i.usbProductId ?? null,
+        conectado_segun_chrome: typeof this.puerto.connected === "boolean" ? this.puerto.connected : "no informado (Chrome < 130 o no aplica)", baud: this.baud };
+    }
+    /** Hace que Chrome olvide el permiso de un adaptador recordado (si el navegador lo permite). */
+    static async olvidar(puerto) { if (puerto && puerto.forget) { await puerto.forget(); return true; } return false; }
   }
 
   class TransporteBLE {
@@ -103,6 +122,7 @@
       }
     }
     get nombre() { return "Bluetooth BLE" + (this.dispositivo.name ? ` (${this.dispositivo.name})` : ""); }
+    detalle() { return { tipo: "Web Bluetooth (BLE)", nombre: this.dispositivo.name || null, servicio: this.rx ? this.rx.service.uuid : null }; }
     async abrir() {
       let servidor;
       try { servidor = await this.dispositivo.gatt.connect(); }
@@ -118,9 +138,10 @@
       if (!this.rx) throw new S.ErrorConexion("Ese dispositivo no parece un adaptador OBD2 BLE. Si tu adaptador es Bluetooth clásico, usá el otro botón.");
       await this.rx.startNotifications();
       this.rx.addEventListener("characteristicvaluechanged", (e) => this.alRecibir(this._dec.decode(e.target.value, { stream: true })));
-      this.dispositivo.addEventListener("gattserverdisconnected", () => {
-        if (this._activo) { this._activo = false; this.alCerrar(new Error("desconectado")); }
-      });
+      if (!this._oyente) {
+        this._oyente = () => { if (this._activo) { this._activo = false; this.alCerrar(new Error("desconectado")); } };
+        this.dispositivo.addEventListener("gattserverdisconnected", this._oyente);
+      }
       this._activo = true;
     }
     async escribir(texto) {
@@ -138,6 +159,37 @@
   }
 
   // ======================================================================= respuestas
+  // Mensajes del ELM327 que no son datos (hoja de datos del ELM327)
+  const MENSAJES_ELM = [
+    [/^NO\s*DATA/i, "sin_datos"], [/UNABLE\s*TO\s*CONNECT/i, "sin_carro"], [/BUS\s*INIT.*ERROR/i, "init"],
+    [/BUFFER\s*FULL/i, "cortada"], [/DATA\s*ERROR/i, "cortada"], [/^STOPPED/i, "cortada"],
+    [/CAN\s*ERROR/i, "bus"], [/BUS\s*ERROR/i, "bus"], [/BUS\s*BUSY/i, "bus"], [/FB\s*ERROR/i, "bus"], [/^ERR\d+/i, "bus"],
+    [/^\?$/, "no_entiende"], [/LV\s*RESET/i, "reinicio"], [/ACT\s*ALERT/i, "reinicio"], [/^ELM327/i, "reinicio"],
+  ];
+  /**
+   * Separa una respuesta en líneas de datos y mensajes del adaptador.
+   * cortada = la respuesta llegó incompleta o con error de transmisión (conviene repetir la consulta).
+   */
+  S.clasificarLineas = function (lineas) {
+    const r = { datos: [], errores: [], reinicio: false, sinDatos: false, cortada: false, sinCarro: false };
+    for (const l of lineas || []) {
+      const t = String(l).trim();
+      if (!t) continue;
+      if (/^BUS\s*INIT/i.test(t) && !/ERROR/i.test(t)) continue;          // "BUS INIT: ...OK" (ISO 9141 / KWP)
+      const m = MENSAJES_ELM.find(([re]) => re.test(t));
+      if (!m) { r.datos.push(t); continue; }
+      r.errores.push({ tipo: m[1], texto: t });
+      if (m[1] === "reinicio") r.reinicio = true;
+      if (m[1] === "sin_datos") r.sinDatos = true;
+      if (m[1] === "sin_carro") r.sinCarro = true;
+      if (m[1] === "cortada" || m[1] === "bus") r.cortada = true;
+    }
+    return r;
+  };
+  /** Respuestas negativas (7F SID código) dentro de los mensajes. */
+  S.negativasDe = (msgs) => (msgs || []).filter((m) => m.datos[0] === 0x7f && m.datos.length >= 3)
+    .map((m) => ({ ecu: m.ecu, servicio: m.datos[1], codigo: m.datos[2], texto: (S.RESPUESTAS_NEGATIVAS || {})[m.datos[2]] || `código ${m.datos[2].toString(16).toUpperCase()}` }));
+
   const aBytes = (s) => { const out = []; for (let i = 0; i + 1 < s.length; i += 2) out.push(parseInt(s.slice(i, i + 2), 16)); return out; };
 
   /**
@@ -256,6 +308,13 @@
       this.error = null;
       this._tiempos = {};
       this.avisos = [];
+      this.negativas = [];
+      this.mapaO2 = null;            // "13" | "1D" | null
+      this.sensoresO2 = null;        // índices presentes (0–7)
+      this.ultimoBorrado = null;
+      this.tiempoBusqueda = null;
+      this._sinEco = false;
+      this.stats = { comandos: 0, ms_total: 0, tiempos_agotados: 0, cortadas: 0, reintentos: 0, negativas: 0, reinicios: 0, errores: {} };
       this.esSimulador = !!transporte.esSimulador;
       this.alProgreso = () => {};       // la app muestra en qué etapa va la conexión
     }
@@ -314,6 +373,7 @@
         this._sucio = false;
       }
       this._rx = "";
+      const t0 = Date.now();
       const promesa = this._esperarPrompt(timeout, cmd);
       this._log("tx", cmd);
       try { await this.t.escribir(cmd + "\r"); }
@@ -326,12 +386,27 @@
       }
       let crudo;
       try { crudo = await promesa; }
-      catch (e) { if (e instanceof ErrorTiempo) { this._sucio = true; this._log("error", `sin respuesta a ${cmd} en ${timeout} ms`); } throw e; }
+      catch (e) {
+        if (e instanceof ErrorTiempo) { this._sucio = true; this.stats.tiempos_agotados++; this._log("error", `sin respuesta a ${cmd} en ${timeout} ms`); }
+        throw e;
+      }
+      this.stats.comandos++; this.stats.ms_total += Date.now() - t0;
       this._log("rx", crudo.trim() || "(vacío)");
       const eco = cmd.replace(/\s/g, "").toUpperCase();
-      return crudo.split(/[\r\n]+/)
-        .map((l) => l.replace(/\0/g, "").trim())
-        .filter((l) => l && l.replace(/\s/g, "").toUpperCase() !== eco && !/^SEARCHING/i.test(l));
+      const todas = crudo.split(/[\r\n]+/).map((l) => l.replace(/\0/g, "").trim()).filter(Boolean);
+      // Si ya se había apagado el eco (ATE0) y vuelve a aparecer, el adaptador se reinició solo
+      if (this._sinEco && !/^AT/i.test(cmd) && todas.some((l) => l.replace(/\s/g, "").toUpperCase() === eco)) this._reinicioDetectado = true;
+      return todas.filter((l) => l.replace(/\s/g, "").toUpperCase() !== eco && !/^SEARCHING/i.test(l));
+    }
+
+    /** Vuelve a configurar el adaptador después de un reinicio (bajo voltaje al dar arranque, clon inestable). */
+    async _reconfigurar() {
+      this._reinicioDetectado = false;
+      this.stats.reinicios++;
+      this._log("info", "el adaptador se reinició solo; se vuelve a configurar");
+      this.avisos.push("El adaptador se reinició solo (pasa con voltaje bajo al dar arranque o con algunos clones). Se volvió a configurar.");
+      for (const c of ["ATE0", "ATL0", "ATS0", this.cabeceras ? "ATH1" : "ATH0", "ATAT1"]) await this._seguro(c);
+      if (this.numProtocolo) await this._seguro("ATSPA" + this.numProtocolo);   // protocolo conocido, con búsqueda automática de respaldo
     }
 
     async _seguro(cmd, timeout = 2000) {
@@ -361,10 +436,24 @@
         return null;
       }
       this._fallos = 0;
-      if (lineas.some((l) => /UNABLE TO CONNECT/i.test(l))) {
-        throw new S.ErrorConexion("La computadora del carro dejó de responder. ¿Apagaste el carro? Poné la llave en ON y volvé a conectar.");
+      const c = S.clasificarLineas(lineas);
+      this.ultimaRespuesta = c;
+      for (const e of c.errores) this.stats.errores[e.tipo] = (this.stats.errores[e.tipo] || 0) + 1;
+      if (c.sinCarro) throw new S.ErrorConexion("La computadora del carro dejó de responder. ¿Apagaste el carro? Poné la llave en ON y volvé a conectar.");
+      if (c.reinicio || this._reinicioDetectado) {
+        await this._reconfigurar();
+        this.ultimaRespuesta = { ...c, cortada: true };
+        return null;
       }
-      const msgs = this._parsear(lineas);
+      const todos = this._parsear(c.datos);
+      const neg = S.negativasDe(todos);
+      if (neg.length) {
+        this.stats.negativas += neg.length;
+        for (const n of neg) { this._log("info", `respuesta negativa a ${cmd}: ${n.texto}`); this.negativas.push({ cmd, ...n }); }
+        if (this.negativas.length > 50) this.negativas.splice(0, this.negativas.length - 50);
+      }
+      const msgs = todos.filter((m) => m.datos[0] !== 0x7f);
+      if (c.cortada) { this.stats.cortadas++; for (const m of msgs) m.incompleto = true; }
       return msgs.length ? msgs : null;
     }
 
@@ -375,11 +464,16 @@
     async _consultaValida(cmd, prueba, timeout = 3000, intentos = 3) {
       let msgs = null;
       for (let i = 0; i < intentos; i++) {
+        this.ultimaRespuesta = null;
         msgs = await this._consulta(cmd, timeout);
+        const c = this.ultimaRespuesta;
         const utiles = (msgs || []).filter((m) => prueba(m.datos));
         if (utiles.length && !utiles.some((m) => m.incompleto)) return msgs;
         if (msgs && !utiles.length && !msgs.some((m) => m.incompleto)) return msgs;   // respuesta completa pero sin ese dato
-        this._log("info", `respuesta incompleta a ${cmd}; reintento ${i + 1}`);
+        // "NO DATA" o respuesta negativa: el carro contestó que no tiene ese dato; repetir no sirve
+        if (!msgs && c && !c.cortada && (c.sinDatos || (c.datos.length && !c.errores.length))) return null;
+        this.stats.reintentos++;
+        this._log("info", `respuesta incompleta o con error a ${cmd}; reintento ${i + 1}`);
       }
       if (msgs) this.avisos.push(`La respuesta a ${cmd} llegó incompleta varias veces; ese dato puede faltar.`);
       return msgs && msgs.filter((m) => !m.incompleto).length ? msgs.filter((m) => !m.incompleto) : null;
@@ -434,20 +528,24 @@
       if (!ok) throw new S.ErrorConexion("El adaptador no responde. Revisá que esté bien metido en el puerto OBD2 (con su luz encendida) y que sea un ELM327.");
       this.alProgreso("adaptador");
       for (const c of ["ATE0", "ATL0", "ATS0", "ATH0", "ATAT1", "ATSP0"]) await this._seguro(c);
+      this._sinEco = true;
       this.version = ((await this._seguro("ATI")) || []).join(" ").trim();
 
       // La primera consulta hace que el adaptador busque el protocolo del carro (puede tardar)
       this.alProgreso("buscando");
       let base = null;
+      const tb = Date.now();
       for (let i = 0; i < 2 && !base; i++) {
         const l = await this._seguro("0100", 20000);
-        const msgs = l ? S.mensajesELM(l).filter((m) => m.datos[0] === 0x41 && m.datos[1] === 0x00) : [];
+        const msgs = l ? S.mensajesELM(S.clasificarLineas(l).datos).filter((m) => m.datos[0] === 0x41 && m.datos[1] === 0x00) : [];
         if (msgs.length) base = msgs;
       }
+      this.tiempoBusqueda = (Date.now() - tb) / 1000;
       if (!base) throw new S.ErrorConexion("El adaptador funciona, pero la computadora del carro no responde. Poné la llave en ON (o encendé el motor) y volvé a intentar.");
 
       const dpn = (((await this._seguro("ATDPN")) || [""])[0] || "").toUpperCase().replace(/\s/g, "");
       const num = dpn.length === 2 && dpn[0] === "A" ? dpn[1] : dpn.slice(-1);
+      this.numProtocolo = /^[1-9A-C]$/.test(num) ? num : null;
       this.esCAN = ["6", "7", "8", "9"].includes(num);
       this.largoCab = num === "7" || num === "9" ? 8 : 3;
       this.protocolo = (((await this._seguro("ATDP")) || [""])[0] || "").replace(/^AUTO,\s*/i, "") || "OBD2";
@@ -463,10 +561,11 @@
 
       this.alProgreso("carro");
       await this._leerSoportados(base);
+      await this._leerMapaO2();
       // Sensores disponibles (si hay dos formas de leer un dato, se usa la primera que el carro soporta)
       const claves = new Set();
       this.disponibles = [];
-      for (const p of S.PIDS) {
+      for (const p of [...S.PIDS, ...S.entradasO2(this.mapaO2, this.sensoresO2)]) {
         if (!this.soportados.has(p.pid) || claves.has(p.clave)) continue;
         this.disponibles.push(p); claves.add(p.clave);
       }
@@ -491,6 +590,16 @@
       for (let inicio = 0x20; sigue && inicio <= 0xc0; inicio += 0x20) {
         sigue = agregar(await this._consultaValida("01" + hex2(inicio), (d) => d[0] === 0x41 && d[1] === inicio && d.length >= 6), inicio);
       }
+    }
+
+    /** PID 13 o 1D: qué sensores de oxígeno tiene el carro y dónde están. */
+    async _leerMapaO2() {
+      for (const [pid, mapa] of [[0x13, "13"], [0x1d, "1D"]]) {
+        if (!this.soportados.has(pid)) continue;
+        const d = await this._pid01(pid);
+        if (d && d.length >= 1) { this.mapaO2 = mapa; this.sensoresO2 = S.sensoresPresentes(d[0]); return; }
+      }
+      this.mapaO2 = null; this.sensoresO2 = null;   // sin mapa: se supone el del PID 13 y se usan los PIDs que el carro diga soportar
     }
 
     async _probarMulti() {
@@ -528,8 +637,12 @@
     }
     info() {
       const i = { tipo: this.esSimulador ? "simulador" : "real", puerto: this.t.nombre, protocolo: this.protocolo, elm: this.version, vin: this.vin,
-        calibracion: this.calibracion, computadora: this.nombreEcu, lectura_rapida: this.multi, encabezados: this.cabeceras, pids: this.pidsDisponibles() };
-      if (this.esSimulador) { i.escenario = this.t.escenario; i.escenario_nombre = this.t.config.nombre; i.cilindrada = 1.8; }
+        calibracion: this.calibracion, computadora: this.nombreEcu, lectura_rapida: this.multi, encabezados: this.cabeceras, pids: this.pidsDisponibles(),
+        es_can: this.esCAN, num_protocolo: this.numProtocolo, mapa_o2: this.mapaO2, sensores_o2: this.sensoresO2 ? this.sensoresO2.length : null,
+        medicion_aire: this.soportados.has(0x10) ? "MAF" : this.soportados.has(0x0b) ? "MAP" : "desconocida",
+        pids_soportados: [...this.soportados].filter((p) => p % 0x20 !== 0).sort((a, b) => a - b).map((p) => p.toString(16).toUpperCase().padStart(2, "0")) };
+      if (this.esSimulador) { i.escenario = this.t.escenario; i.escenario_nombre = this.t.config.nombre; i.perfil_sim = this.t.perfil;
+        i.cilindrada = (S.PERFILES_SIM[this.t.perfil] || S.PERFILES_SIM.moderno).cilindrada; i.perfil_nombre = (S.PERFILES_SIM[this.t.perfil] || {}).nombre; }
       return i;
     }
 
@@ -558,8 +671,18 @@
         const v = await this.voltajeRapido();
         if (v != null) { this._ultimos.voltaje = v; this._tiempos.voltaje = Date.now() / 1000; }
       }
-      return { t: Date.now() / 1000, ...this._ultimos };
+      // Solo datos frescos: los rápidos leídos en esta vuelta y los lentos de hace menos de 20 s.
+      // Un sensor que dejó de responder NO se repite como si fuera una lectura nueva.
+      const m = { t: Date.now() / 1000 };
+      for (const [k, v] of Object.entries(this._ultimos)) {
+        const p = this.disponibles.find((x) => x.clave === k);
+        const tk = this._tiempos[k] || 0;
+        if ((p && p.rapido) ? tk >= ahora : m.t - tk <= 20) m[k] = v;
+      }
+      return m;
     }
+    /** Últimos valores conocidos (con su hora en metaDato) para mostrarlos en pantalla, aunque sean viejos. */
+    ultimos() { return { ...this._ultimos }; }
 
     /** Voltaje medido por el adaptador en el conector (rápido; sirve para la prueba de arranque). */
     async voltajeRapido() {
@@ -600,21 +723,45 @@
       return S.unirCodigos(await this._dtcs("03"), await this._dtcs("07"), await this._dtcs("0A"));
     }
 
+    /** PIDs guardados en el freeze frame según su propio mapa (02 00 00, 02 20 00…). null si el carro no lo reporta. */
+    async _mapaFreezeFrame() {
+      const pids = new Set();
+      let inicio = 0x00, sigue = true, alguno = false;
+      while (sigue && inicio <= 0xc0) {
+        const ok = (d) => d[0] === 0x42 && d[1] === inicio && d.length >= 7;
+        const m = this._delMotor(await this._consultaValida("02" + hex2(inicio) + "00", ok), ok);
+        sigue = false;
+        if (m) {
+          alguno = true;
+          for (let i = 0; i < 32; i++) if (m.datos[3 + (i >> 3)] & (0x80 >> (i & 7))) { if (i === 31) sigue = true; else pids.add(inicio + i + 1); }
+        }
+        inicio += 0x20;
+      }
+      return alguno ? pids : null;
+    }
+
     async leerFreezeFrame() {
       const okFF = (d) => d[0] === 0x42 && d[1] === 0x02 && d.length >= 5;
       const m = this._delMotor(await this._consultaValida("020200", okFF), okFF);
       const codigo = m ? S.bytesACodigo(m.datos[3], m.datos[4]) : null;
       if (!codigo) return null;
-      const datos = {};
-      for (const clave of S.PIDS_FREEZE_FRAME) {
-        const p = this.disponibles.find((x) => x.clave === clave);
-        if (!p) continue;
-        const okP = (d) => d[0] === 0x42 && d[1] === p.pid && d.length >= 3 + p.f.length;
-        const r = this._delMotor(await this._consultaValida("02" + hex2(p.pid) + "00", okP), okP);
-        const v = r ? ELM327._aplicar(p, r.datos.slice(3)) : null;
-        if (v != null) datos[clave] = redondear(v, 2);
+      const mapa = await this._mapaFreezeFrame();
+      // Con mapa: todo lo que el freeze frame guardó y la app sabe interpretar. Sin mapa: una lista básica de lo que el carro soporta.
+      const todos = [...S.PIDS, ...S.entradasO2(this.mapaO2, this.sensoresO2)];
+      const candidatos = mapa ? todos.filter((p) => mapa.has(p.pid) && p.pid !== 0x02)
+        : S.PIDS_FREEZE_FRAME.map((c) => this.disponibles.find((x) => x.clave === c)).filter(Boolean);
+      const porPid = {}, datos = {};
+      for (const p of candidatos) {
+        if (!(p.pid in porPid)) {
+          const okP = (d) => d[0] === 0x42 && d[1] === p.pid && d.length >= 3 + p.n;
+          const r = this._delMotor(await this._consultaValida("02" + hex2(p.pid) + "00", okP), okP);
+          porPid[p.pid] = r ? r.datos.slice(3) : null;
+        }
+        if (datos[p.clave] != null) continue;
+        const v = ELM327._aplicar(p, porPid[p.pid]);
+        if (v != null) datos[p.clave] = redondear(v, 3);
       }
-      return { codigo, datos };
+      return { codigo, datos, con_mapa: !!mapa };
     }
 
     async leerExtras() {
@@ -629,7 +776,7 @@
 
     /** Modo 06: resultados de las pruebas internas de la computadora (contadores de misfire, catalizador...). */
     async leerPruebas06() {
-      if (!this.esCAN) return { disponible: false, motivo: "Tu carro usa un protocolo viejo (no CAN). Las pruebas internas solo se leen en carros CAN (la mayoría desde 2008)." };
+      if (!this.esCAN) return this._pruebas06NoCAN();
       const mids = [];
       let inicio = 0x00, sigue = true;
       while (sigue && inicio <= 0xe0) {
@@ -655,25 +802,104 @@
         const m = this._delMotor(await this._consultaValida("06" + hex2(mid), okMid, 4000), okMid);
         if (m) pruebas.push(...S.pruebasDeMensaje06(m.datos));
       }
-      return S.resumirPruebas06(pruebas);
+      return { ...S.resumirPruebas06(pruebas), formato: "can" };
+    }
+
+    /**
+     * Modo 06 en ISO 9141-2, ISO 14230-4 y J1850 (SAE J1979): 06 00 → 46 00 relleno A B C D (TIDs soportados);
+     * 06 TID → uno o varios 46 TID TLTCID valor límite. Los TID/CID los define el fabricante: se muestran los números originales.
+     */
+    async _pruebas06NoCAN() {
+      const tids = [];
+      let inicio = 0x00, sigue = true;
+      while (sigue && inicio <= 0xe0) {
+        const ok = (d) => d[0] === 0x46 && d[1] === inicio && d.length >= 7;
+        const m = this._delMotor(await this._consultaValida("06" + hex2(inicio), ok, 5000), ok);
+        sigue = false;
+        if (m) for (let i = 0; i < 32; i++) if (m.datos[3 + (i >> 3)] & (0x80 >> (i & 7))) { if (i === 31) sigue = true; else tids.push(inicio + i + 1); }
+        inicio += 0x20;
+      }
+      if (!tids.length) return { disponible: false, formato: "no_can", motivo: "La computadora de tu carro no reporta resultados de monitoreo (modo 06), o no respondió a esa consulta." };
+      const pruebas = [];
+      for (const tid of tids) {
+        const ok = (d) => d[0] === 0x46 && d[1] === tid && d.length >= 7;
+        const msgs = await this._consultaValida("06" + hex2(tid), ok, 5000);
+        for (const m of msgs || []) {
+          if (!ok(m.datos)) continue;
+          const pr = S.pruebaNoCAN06(m.datos);
+          if (pr && !pruebas.some((x) => x.tid === pr.tid && x.cid === pr.cid)) pruebas.push(pr);
+        }
+      }
+      return { ...S.resumirPruebas06(pruebas), formato: "no_can",
+        nota: "Formato no CAN: los números de prueba (TID) y componente (CID) los define el fabricante y el valor no tiene unidades estándar. " +
+          "Se muestran tal cual; el resultado 'pasó/falló' sí es el que calcula la computadora con su propio límite." };
+    }
+
+    /**
+     * Diagnóstico técnico de la conexión (para investigar problemas con un adaptador o un carro).
+     * Usa la conexión actual; no manda comandos que cambien nada en el carro.
+     */
+    async diagnosticoConexion({ lecturas = 15 } = {}) {
+      const r = { fecha: new Date().toISOString(), transporte: this.t.detalle ? this.t.detalle() : { tipo: this.t.nombre }, simulador: this.esSimulador, pasos: [] };
+      const paso = (nombre, ok, detalle) => r.pasos.push({ nombre, ok, detalle });
+      paso("Conexión con el adaptador", this._abierto, this.t.nombre);
+      const ati = ((await this._seguro("ATI")) || []).join(" ").trim();
+      const desc = ((await this._seguro("AT@1")) || []).join(" ").trim();
+      paso("Versión del adaptador (ATI)", !!ati, ati || "no respondió");
+      paso("Descripción (AT@1)", !!desc && desc !== "?", desc || "no respondió");
+      if (/v2\.1/i.test(ati)) r.nota_adaptador = "Muchos adaptadores que dicen v2.1 son clones recortados; si hay fallas, un v1.5 suele funcionar mejor.";
+      const v = await this.voltajeRapido();
+      paso("Voltaje en el conector (ATRV)", v != null, v != null ? `${v} V` : "el adaptador no lo reporta");
+      paso("Protocolo del carro", !!this.protocolo, `${this.protocolo || "?"} (ATDPN ${this.numProtocolo || "?"}) · CAN: ${this.esCAN ? "sí" : "no"} · búsqueda: ${this.tiempoBusqueda != null ? this.tiempoBusqueda.toFixed(1) + " s" : "?"}`);
+      paso("Encabezados (para saber qué computadora responde)", this.cabeceras || !this.esCAN, this.esCAN ? (this.cabeceras ? "activados" : "el adaptador no los maneja bien; se usa sin encabezados") : "no se usan en protocolos no CAN");
+      paso("Varios datos por consulta", this.multi || !this.esCAN, this.multi ? "sí" : this.esCAN ? "no (el adaptador o el carro no lo aceptan)" : "no aplica en este protocolo");
+      paso("Sensores disponibles", this.disponibles.length > 0, `${this.pidsDisponibles().length} datos en vivo; PIDs: ${this.info().pids_soportados.join(" ")}`);
+      paso("Sensores de oxígeno", true, this.mapaO2 ? `mapa PID ${this.mapaO2}: ${this.sensoresO2.length} sensor(es)` : "el carro no reporta el mapa (se usan los PIDs que soporte)");
+      paso("VIN", !!this.vin, this.vin ? this.vin.slice(0, 3) + "…" + this.vin.slice(-6) + " (tapado)" : "no disponible (común antes de ~2005)");
+      // Velocidad real de lectura
+      const t0 = performance.now(); let buenas = 0, fallas = 0;
+      for (let i = 0; i < lecturas; i++) {
+        try { const m = await this.muestra(); if (Object.keys(m).length > 1) buenas++; else fallas++; } catch (e) { if (e instanceof S.ErrorConexion) throw e; fallas++; }
+      }
+      const seg = (performance.now() - t0) / 1000;
+      r.velocidad = { vueltas: lecturas, buenas, fallas, segundos: Math.round(seg * 10) / 10, vueltas_por_segundo: Math.round((lecturas / seg) * 10) / 10,
+        ms_promedio_por_comando: this.stats.comandos ? Math.round(this.stats.ms_total / this.stats.comandos) : null };
+      paso("Velocidad de lectura", buenas > 0, `${r.velocidad.vueltas_por_segundo} vueltas por segundo (${buenas}/${lecturas} completas), ${r.velocidad.ms_promedio_por_comando} ms por comando`);
+      r.estadisticas = { ...this.stats, errores: { ...this.stats.errores } };
+      r.avisos = this.avisos.slice(-10);
+      r.negativas = this.negativas.slice(-10).map((n) => `${n.cmd}: ${n.texto}`);
+      return r;
     }
 
     async leerTodo() {
-      return {
+      const l = {
         fecha: Date.now() / 1000,
         estado: await this.leerEstado(),
         codigos: await this.leerCodigos(),
         freeze_frame: await this.leerFreezeFrame(),
         extras: await this.leerExtras(),
+        avisos: [],
       };
+      // La computadora dice cuántos códigos confirmados tiene (PID 01): se compara con los que entregó
+      const conf = l.codigos.filter((c) => c.tipo === "almacenado").length;
+      if (l.estado.num_dtc != null && l.estado.num_dtc !== conf) {
+        l.avisos.push(`La computadora dice tener ${l.estado.num_dtc} código(s) confirmado(s), pero entregó ${conf}. ` +
+          (l.estado.num_dtc > conf ? "Puede que algún código no se haya podido leer (repetí la lectura) o que sea de un módulo que no responde por OBD genérico." : "Algunos códigos pueden venir de otro módulo."));
+      }
+      const neg = this.negativas.filter((n) => n.servicio === 0x03 || n.servicio === 0x07 || n.servicio === 0x0a);
+      if (neg.length) l.avisos.push(`La computadora respondió negativamente al pedir códigos: ${neg.map((n) => n.texto).join("; ")}.`);
+      return l;
     }
 
     async borrarCodigos() {
       const l = await this.comando("04", 6000).catch((e) => { if (e instanceof S.ErrorConexion) throw e; return []; });
-      return l.some((x) => {
-        const s = x.replace(/\s/g, "");
-        return s.startsWith("44") || (this.cabeceras && s.slice(this.largoCab + 2, this.largoCab + 4) === "44");
-      });
+      const c = S.clasificarLineas(l);
+      const msgs = this._parsear(c.datos);
+      const ok = msgs.some((m) => m.datos[0] === 0x44);
+      const neg = S.negativasDe(msgs);
+      this.ultimoBorrado = { ok, motivo: ok ? "" : neg.length ? `La computadora rechazó el borrado: ${neg[0].texto}.` : c.sinDatos ? "La computadora no respondió al borrado." : "El carro no confirmó el borrado." };
+      this._log("info", ok ? "códigos borrados" : this.ultimoBorrado.motivo);
+      return ok;
     }
   }
 

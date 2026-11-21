@@ -1,4 +1,4 @@
-/* ScanIA · diagnóstico con IA (Claude), llamado directo desde el navegador */
+/* ScanIA · diagnóstico con IA (Claude) a través del servidor propio de la familia (la clave de Anthropic nunca está en la app) */
 (function (raiz) {
   const S = (raiz.ScanIA = raiz.ScanIA || {});
 
@@ -14,20 +14,21 @@
 Principios:
 1. Confirmar antes de cambiar piezas. Proponé primero las pruebas más baratas y simples que confirmen o descarten cada causa.
 2. Trabajá con la evidencia que te mandan: códigos (confirmados, pendientes, permanentes y de qué computadora vienen), freeze frame, datos en vivo y sus curvas, pruebas internas de la computadora (modo 06), pruebas guiadas, hallazgos del motor de reglas local, historial de mantenimiento, síntomas y fotos. Explicá qué dato apoya cada causa y qué dato la contradice.
-3. NO inventes mediciones, valores ni resultados que no están en los datos. NO uses porcentajes de probabilidad. Usá niveles de confianza razonados (alta / media / baja) y explicá en qué evidencia se basa cada uno.
-4. Distinguí siempre: "confirmado" (dos o más evidencias independientes coinciden, por ejemplo código + patrón en datos en vivo + prueba), "sospecha" (una evidencia clara) y "posibilidad" (indicio débil o solo conocimiento general).
+3. NO inventes lecturas, códigos, especificaciones de fábrica ni resultados de pruebas. Usá SOLO los datos del mensaje. Si un sensor aparece como "no disponible", no supongas su valor. Si citás un valor de fábrica (ralentí, presión, compresión), decí que hay que confirmarlo en el manual. NO uses porcentajes de probabilidad: usá niveles (alta / media / baja) y explicá en qué evidencia se basa cada uno.
+4. "estado" se refiere a la CONDICIÓN observada (por ejemplo "mezcla pobre", "fallo en el cilindro 2"), no a la pieza culpable: "confirmado" = la muestran dos fuentes DISTINTAS (datos en vivo + diagnóstico propio de la computadora, o + una prueba); "sospecha" = una fuente clara; "posibilidad" = indicio débil o solo conocimiento general. Ojo: un código y el dato que lo provoca NO son independientes (P0171 se enciende POR los ajustes altos; P0302 sale del mismo monitor que los contadores de misfire). Una causa (pieza) solo queda confirmada con una prueba física; si los datos no separan dos causas, decilo y di qué prueba las separa. No confundas correlación con causalidad.
 5. Si los datos no alcanzan para concluir, decilo claramente y pedí lo que falta (qué prueba hacer o qué dato leer).
 6. El motor de reglas local ya analizó los datos: sus hallazgos son evidencia, pero si no estás de acuerdo con alguno explicá por qué.
 7. Un código dice qué sistema detectó la falla, no qué pieza está mala. Señalá las piezas que la gente cambia por error.
 8. Fallas conocidas del modelo: si tenés la herramienta de búsqueda web, buscá (en inglés y español) fallas típicas, boletines técnicos (TSB) y campañas de ese modelo/motor/año relacionadas con los códigos o síntomas, y citá de dónde salen. Sin búsqueda, presentalo como conocimiento general (posibilidad), no como certeza. Interpretá los códigos del fabricante (P1xxx, etc.) según la marca y aclaralo.
 9. Contexto local: clima caliente y húmedo, calles en mal estado, gasolina de calidad variable, repuestos genéricos o usados comunes, y dueños con herramientas básicas. Preferí pruebas con herramientas sencillas (multímetro, agua jabonosa, humo de incienso, intercambiar piezas entre cilindros).
 10. Seguridad: si hay riesgo (sobrecalentamiento, presión de aceite baja, olor a gasolina, misfire fuerte con check engine parpadeando, frenos), decí claramente que no maneje. No pidas usar el teléfono mientras se maneja. Las pruebas con riesgo (piezas en movimiento, alto voltaje, sistema de combustible presurizado, bolsas de aire) derivalas a un mecánico.
-11. Limitaciones: un ELM327 lee cada dato cada 0.2–2 segundos (no ve señales rápidas) y el OBD2 genérico casi solo ve motor, emisiones y a veces transmisión (no ABS, bolsas de aire, carrocería).
+11. Limitaciones: un ELM327 lee cada dato cada 0.2–2 segundos (no ve señales rápidas; el mensaje dice cuántas lecturas por segundo hubo) y el OBD2 genérico casi solo ve motor, emisiones y a veces transmisión (no ABS, bolsas de aire, carrocería). Los motores con sensor MAP (sin MAF) se comportan distinto ante una fuga de vacío que los que tienen MAF: tenelo en cuenta. Si se indica un perfil del vehículo, respetá lo que dice que NO se puede ver por OBD genérico.
 12. Lenguaje sencillo, español centroamericano (el voseo está bien), directo. Explicá los términos técnicos la primera vez.
 
 FORMATO DE TU PRIMERA RESPUESTA: después de buscar (si buscás), tu texto final debe ser únicamente un objeto JSON válido, sin texto antes ni después y sin bloques de código:
 {
   "resumen": "2 a 4 frases sencillas: qué está pasando y qué es lo más probable",
+  "evidencias_clave": ["los datos observados más importantes, tal como aparecen en el mensaje"],
   "datos_suficientes": true,
   "que_falta": "si los datos no alcanzan, qué falta para concluir (o cadena vacía)",
   "urgencia": {"nivel": "detener | pronto | programar | monitorear", "puede_manejar": true, "explicacion": "por qué"},
@@ -47,7 +48,8 @@ FORMATO DE TU PRIMERA RESPUESTA: después de buscar (si buscás), tu texto final
   "datos_a_vigilar": ["qué dato en vivo mirar y qué valor esperar"],
   "preguntas": ["pregunta para el dueño que ayudaría a afinar el diagnóstico"],
   "fallas_conocidas": ["falla típica o boletín técnico de este modelo que aplique (o lista vacía)"],
-  "nota_seguridad": "advertencia importante o cadena vacía"
+  "nota_seguridad": "advertencia importante o cadena vacía",
+  "limitaciones": ["qué no se pudo saber con estos datos y por qué (sensores que el carro no reporta, módulos que el OBD genérico no ve, pocas lecturas)"]
 }
 Reglas del JSON: de 1 a 4 problemas, ordenados del más urgente/probable al menos; cada problema con 1 a 5 causas ordenadas; máximo 4 preguntas.
 
@@ -55,7 +57,8 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
 
   function lineaVehiculo(v) {
     const partes = [];
-    for (const [k, n] of [["apodo", "Carro"], ["marca", "Marca"], ["modelo", "Modelo"], ["anio", "Año"], ["motor", "Motor"], ["codigo_motor", "Código de motor"],
+    // El apodo no se envía (puede tener nombres de personas)
+    for (const [k, n] of [["marca", "Marca"], ["modelo", "Modelo"], ["anio", "Año"], ["motor", "Motor"], ["codigo_motor", "Código de motor"],
       ["cilindrada", "Cilindrada (L)"], ["cilindros", "Cilindros"], ["combustible", "Combustible"], ["transmision", "Transmisión"], ["traccion", "Tracción"],
       ["km", "Kilometraje"], ["vin", "VIN"]]) {
       if (k === "vin" && !(v && v._compartirVIN)) continue;
@@ -66,21 +69,34 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
   }
 
   S.construirContexto = function (o) {
-    const { vehiculo, sintomas, info, lectura, resumenTexto, hallazgos, series, pruebas06, guiadas, mantenimiento } = o;
+    const { vehiculo, sintomas, sintomasMarcados, info, lectura, resumenTexto, hallazgos, series, pruebas06, guiadas, mantenimiento, perfil, calidad } = o;
     const s = ["# Vehículo", lineaVehiculo(vehiculo)];
     if (vehiculo && vehiculo.notas) s.push(`Notas del dueño: ${vehiculo.notas}`);
+    if (vehiculo && vehiculo.odometro === "mi") s.push("El tablero del carro marca MILLAS (el kilometraje ya está convertido a km).");
     if (info) {
       if (info.tipo === "simulador") s.push("NOTA: estos datos vienen de un SIMULADOR de prueba, no de un carro real.");
       if (info.vin && vehiculo && vehiculo._compartirVIN) s.push(`VIN leído de la computadora: ${info.vin}`);
-      if (info.protocolo) s.push(`Protocolo OBD: ${info.protocolo}`);
+      if (info.protocolo) s.push(`Protocolo OBD: ${info.protocolo}${info.es_can === false ? " (no CAN)" : ""}`);
+      if (info.medicion_aire) s.push(`Medición de aire del motor: ${info.medicion_aire === "MAP" ? "sensor MAP (sin MAF)" : info.medicion_aire}`);
       if (info.computadora) s.push(`Computadora: ${info.computadora}`);
       if (info.calibracion) s.push(`ID de calibración (software): ${info.calibracion}`);
+      if (info.pids && info.pids.length) s.push(`Datos en vivo que el carro SÍ reporta: ${info.pids.join(", ")}`);
+      const claves = ["maf", "map", "voltaje", "temp_aceite", "baro", "o2_b2s1", "lambda_b1s1", "presion_comb", "egr_error"];
+      const no = claves.filter((k) => !(info.pids || []).includes(k));
+      if (no.length) s.push(`Datos que el carro NO reporta (no los supongas): ${no.join(", ")}`);
     }
+    if (perfil) {
+      s.push(`\n# Perfil del vehículo: ${perfil.nombre} (${perfil.validado ? "validado" : "orientativo, sin información de fábrica"})`);
+      s.push(...perfil.avisos.map((a) => "- " + a));
+      s.push("Lo que requiere escáner o información de la marca (no se ve por OBD genérico): " + perfil.B.join(" | "));
+    }
+    if (calidad && calidad.length) s.push("\n# Calidad de los datos", ...calidad.map((c) => "- " + c));
     if (mantenimiento && mantenimiento.length) {
       s.push("\n# Mantenimientos registrados por el dueño");
       for (const m of mantenimiento.slice(0, 15)) s.push(`- ${m.fecha_texto || ""} ${m.km ? m.km + " km" : ""}: ${m.tipo}${m.nota ? " (" + m.nota + ")" : ""}`);
     }
     s.push("\n# Síntomas que describe el dueño", String(sintomas || "").trim() || "No describió síntomas.");
+    if (sintomasMarcados && sintomasMarcados.length) s.push("Síntomas marcados en la lista: " + sintomasMarcados.join("; "));
     const estado = (lectura && lectura.estado) || null;
     s.push("\n# Luz check engine y monitores");
     if (estado) {
@@ -102,13 +118,15 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     } else s.push(lectura ? "Ninguno." : "No se leyeron.");
     const ff = lectura && lectura.freeze_frame;
     if (ff) s.push(`\n# Freeze frame (foto de los sensores cuando saltó ${ff.codigo})`, Object.entries(ff.datos || {}).map(([k, v]) => `${k}=${v}`).join(", ") || "sin datos");
+    if (lectura && (lectura.avisos || []).length) s.push("\n# Avisos de la lectura", ...lectura.avisos.map((a) => "- " + a));
     const extras = (lectura && lectura.extras) || {};
     if (Object.keys(extras).length) s.push("\n# Otros datos", Object.entries(extras).map(([k, v]) => `${(S.NOMBRES_EXTRAS && S.NOMBRES_EXTRAS[k]) || k}: ${v}`).join("; "));
     if (pruebas06 && pruebas06.disponible) {
       s.push("\n# Pruebas internas de la computadora (modo 06)");
       if ((pruebas06.misfire || []).length) s.push("Fallos de encendido por cilindro (promedio 10 ciclos / ciclo actual): " + pruebas06.misfire.map((c) => `cil ${c.cilindro}: ${c.promedio ?? "?"}/${c.actual ?? "?"}`).join(", "));
       const fall = pruebas06.fallidas || [];
-      s.push(fall.length ? "Pruebas FALLIDAS: " + fall.map((p) => `${p.nombre} – ${p.prueba}: ${p.valor} ${p.unidad} (límite ${p.min}–${p.max})`).join("; ") : `Todas las ${pruebas06.pruebas.length} pruebas dentro de sus límites.`);
+      if (pruebas06.formato === "no_can") s.push("Formato no CAN: los números de prueba los define el fabricante; NO interpretes a qué componente corresponden sin información de servicio.");
+      s.push(fall.length ? "Pruebas FALLIDAS: " + fall.map((p) => p.no_can ? `${p.nombre}: valor ${p.valor}, ${p.prueba}` : `${p.nombre} – ${p.prueba}: ${p.valor} ${p.unidad} (límite ${p.min}–${p.max})`).join("; ") : `Todas las ${pruebas06.pruebas.length} pruebas dentro de sus límites.`);
     } else if (pruebas06 && pruebas06.motivo) s.push("\n# Pruebas internas (modo 06)", pruebas06.motivo);
     if (guiadas && guiadas.length) {
       s.push("\n# Pruebas guiadas que hizo el dueño con la app");
@@ -118,7 +136,8 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     if (series) s.push("\n# Curvas de datos en el tiempo (CSV, muestreado)", series);
     s.push("\n# Hallazgos del análisis automático local (reglas)");
     if (hallazgos && hallazgos.length) {
-      for (const h of hallazgos) s.push(`- [${h.gravedad}] ${h.titulo}` + ((h.evidencia || []).length ? ` — ${h.evidencia.join("; ")}` : ""));
+      for (const h of hallazgos) s.push(`- [${h.gravedad}${h.certeza ? ", " + h.certeza : ""}] ${h.titulo}` + ((h.evidencia || []).length ? ` — ${h.evidencia.join("; ")}` : "") +
+        (h.condiciones ? ` (condiciones: ${h.condiciones})` : ""));
     } else s.push("Ninguno.");
     return s.join("\n");
   };
@@ -178,6 +197,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     const cuerpo = { model: modelo, max_tokens: maxTokens, system: sistema || S.PROMPT_SISTEMA, messages: mensajes.slice() };
     if (buscar) cuerpo.tools = [HERRAMIENTA_BUSQUEDA];
     const bloques = [];
+    let fin = null;
     for (let vuelta = 0; vuelta < 4; vuelta++) {
       let datos;
       try {
@@ -189,6 +209,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
         throw e;
       }
       bloques.push(...(datos.content || []));
+      fin = datos.stop_reason || null;
       if (datos.stop_reason !== "pause_turn") break;
       // La búsqueda tardó: se manda lo que va y se pide que siga
       cuerpo.messages = [...mensajes, { role: "assistant", content: bloques.slice() }];
@@ -209,7 +230,9 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
         for (const r of b.content.slice(0, 3)) if (r.url && !fuentes.some((f) => f.url === r.url)) fuentes.push({ titulo: r.title || r.url, url: r.url });
       }
     }
-    return { texto, fuentes: fuentes.slice(0, 10), busquedas: bloques.filter((b) => b.type === "server_tool_use").length };
+    const seguras = fuentes.filter((x) => /^https?:\/\//i.test(x.url));   // nunca enlaces javascript: u otros esquemas
+    return { texto, fuentes: seguras.slice(0, 10), busquedas: bloques.filter((b) => b.type === "server_tool_use").length,
+      incompleta: fin === "max_tokens" || fin === "pause_turn" };
   }
   S.llamarIA = llamar;
 
@@ -257,7 +280,27 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       no_cambiar_todavia: comoLista(d.no_cambiar_todavia).map(txt).filter(Boolean),
       datos_a_vigilar: comoLista(d.datos_a_vigilar).map(txt).filter(Boolean), preguntas: comoLista(d.preguntas).map(txt).filter(Boolean),
       fallas_conocidas: comoLista(d.fallas_conocidas).map(txt).filter(Boolean), nota_seguridad: txt(d.nota_seguridad),
+      evidencias_clave: comoLista(d.evidencias_clave).map(txt).filter(Boolean), limitaciones: comoLista(d.limitaciones).map(txt).filter(Boolean),
     };
+  };
+
+  /**
+   * Revisa la respuesta de la IA contra los datos reales: códigos que menciona y no se leyeron, y sensores que el carro no reporta.
+   * datos = { codigos: ["P0171", ...], pids: ["rpm", ...] }. Devuelve una lista de avisos (vacía si todo cuadra).
+   */
+  S.verificarRespuestaIA = function (diag, datos = {}) {
+    if (!diag) return [];
+    const leidos = new Set((datos.codigos || []).map((c) => String(c).toUpperCase()));
+    // Se revisan las partes donde la IA habla de ESTE carro (no las fallas conocidas del modelo, que son conocimiento general)
+    const propio = JSON.stringify({ r: diag.resumen, e: diag.evidencias_clave, p: (diag.problemas || []).map((p) => ({ e: p.evidencias, pr: p.problema })) });
+    const mencionados = [...new Set((propio.match(/\b[PCBU][0-3][0-9A-F]{3}\b/g) || []).map((c) => c.toUpperCase()))];
+    const avisos = [];
+    const inventados = mencionados.filter((c) => !leidos.has(c));
+    if (inventados.length && datos.codigos) avisos.push(`La IA menciona ${inventados.join(", ")} como evidencia, pero ese código NO está entre los leídos de tu carro. Tomalo como una posibilidad general, no como un dato.`);
+    const pids = new Set(datos.pids || []);
+    if (datos.pids && !pids.has("maf") && /\b(lectura|valor|dato) del (sensor )?MAF\b|\bMAF (marca|lee|indica)/i.test(propio)) avisos.push("La IA habla de una lectura del sensor MAF, pero tu carro no reporta MAF.");
+    if (diag.incompleta) avisos.push("La respuesta de la IA llegó cortada (se acabó el espacio de respuesta). Pedí de nuevo el diagnóstico o hacé preguntas más cortas.");
+    return avisos;
   };
 
   /** Arma el contenido de un mensaje con texto y fotos (base64 JPEG). */
@@ -274,7 +317,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     const mensajes = [{ role: "user", content: contenido(contexto + (imagenes && imagenes.length ? `\n\nTe mando ${imagenes.length} foto(s).` : "") + "\n\nHacé el diagnóstico.", imagenes) }];
     const r = await llamar({ conexion, modelo, mensajes, maxTokens: buscar ? 7000 : 5000, buscar });
     mensajes.push({ role: "assistant", content: r.texto });
-    return { diagnostico: { ...S.interpretarJson(r.texto), fuentes: r.fuentes }, mensajes };
+    return { diagnostico: { ...S.interpretarJson(r.texto), fuentes: r.fuentes, incompleta: r.incompleta }, mensajes };
   };
 
   S.seguimiento = async function ({ conexion, modelo, mensajes, pregunta, datosActualizados, imagenes, buscar }) {
@@ -286,7 +329,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     const nuevos = [...mensajes, { role: "user", content: contenido(texto, imagenes) }];
     const r = await llamar({ conexion, modelo, mensajes: nuevos, maxTokens: 2000, buscar });
     nuevos.push({ role: "assistant", content: r.texto });
-    return { respuesta: r.texto, fuentes: r.fuentes, mensajes: nuevos };
+    return { respuesta: r.texto + (r.incompleta ? "\n\n(La respuesta quedó cortada.)" : ""), fuentes: r.fuentes, mensajes: nuevos, incompleta: r.incompleta };
   };
 
   /** Pregunta rápida sobre un código (sin conectar el carro). */

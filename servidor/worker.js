@@ -12,6 +12,8 @@
  *   MODELOS             modelos permitidos separados por coma (por defecto: claude-sonnet-5-5,claude-opus-5-5)
  *   LIMITE_POR_MINUTO   solicitudes por minuto por dirección IP (por defecto 8)
  *   LIMITE_POR_DIA      solicitudes por día en total (por defecto 120)
+ * Protección extra: 6 códigos equivocados desde la misma IP en 15 min la bloquean 15 min; máximo 6 fotos por consulta,
+ * 8,000 tokens de respuesta y 5 búsquedas web por consulta (control de costos).
  * Opcional: un espacio KV llamado LIMITES para que el límite diario sea exacto entre servidores.
  *
  * Rutas:
@@ -24,9 +26,26 @@ const MAX_TOKENS = 8000;
 const MAX_CUERPO = 9 * 1024 * 1024;     // fotos incluidas
 const MAX_MENSAJES = 40;
 const MAX_SISTEMA = 30000;
+const MAX_IMAGENES = 6;
+const MAX_FALLOS = 6;                   // códigos equivocados por IP antes de bloquear
+const VENTANA_FALLOS = 15 * 60000;      // 15 minutos
 
 const porMinuto = new Map();            // ip -> [marcas de tiempo]  (memoria del servidor, aproximado)
 const porDia = { fecha: "", cuenta: 0 };
+const fallos = new Map();               // ip -> [marcas de tiempo de códigos equivocados]
+
+function bloqueada(ip) {
+  const ahora = Date.now();
+  const l = (fallos.get(ip) || []).filter((t) => ahora - t < VENTANA_FALLOS);
+  fallos.set(ip, l);
+  return l.length >= MAX_FALLOS;
+}
+function anotarFallo(ip) {
+  const l = fallos.get(ip) || [];
+  l.push(Date.now());
+  fallos.set(ip, l);
+  if (fallos.size > 5000) fallos.clear();
+}
 
 function igualSeguro(a, b) {
   a = String(a || ""); b = String(b || "");
@@ -86,10 +105,13 @@ export function validarCuerpo(c, env) {
   const permitidos = modelos.length ? modelos : MODELOS_POR_DEFECTO;
   if (!permitidos.includes(c.model)) throw new Error(`Modelo no permitido: ${c.model}`);
   if (!Array.isArray(c.messages) || !c.messages.length || c.messages.length > MAX_MENSAJES) throw new Error("Mensajes inválidos");
+  let imagenes = 0;
   for (const m of c.messages) {
     if (!m || !["user", "assistant"].includes(m.role)) throw new Error("Rol inválido");
     if (typeof m.content !== "string" && !Array.isArray(m.content)) throw new Error("Contenido inválido");
+    if (Array.isArray(m.content)) imagenes += m.content.filter((b) => b && b.type === "image").length;
   }
+  if (imagenes > MAX_IMAGENES) throw new Error(`Demasiadas fotos (máximo ${MAX_IMAGENES})`);
   if (c.system != null && (typeof c.system !== "string" || c.system.length > MAX_SISTEMA)) throw new Error("Instrucciones inválidas");
   const limpio = {
     model: c.model,
@@ -117,13 +139,16 @@ export default {
     if (!env.ANTHROPIC_API_KEY || !env.CODIGO_FAMILIAR || String(env.CODIGO_FAMILIAR).length < 8) {
       return respuesta({ error: { message: "El servidor no está configurado: faltan ANTHROPIC_API_KEY o CODIGO_FAMILIAR (mínimo 8 caracteres)." } }, 500, cors.headers);
     }
+    const ip = request.headers.get("CF-Connecting-IP") || "local";
+    // Después de varios códigos equivocados, esa dirección queda bloqueada un rato (evita adivinar el código)
+    if (bloqueada(ip)) return respuesta({ error: { message: "Demasiados intentos con un código equivocado. Esperá 15 minutos." } }, 429, cors.headers);
     if (!igualSeguro(request.headers.get("x-codigo-familiar"), env.CODIGO_FAMILIAR)) {
+      anotarFallo(ip);
       await new Promise((r) => setTimeout(r, 400));
       return respuesta({ error: { message: "Código familiar incorrecto." } }, 401, cors.headers);
     }
     if (url.pathname === "/v1/probar") return respuesta({ ok: true }, 200, cors.headers);
 
-    const ip = request.headers.get("CF-Connecting-IP") || "local";
     if (!limiteMinuto(ip, Number(env.LIMITE_POR_MINUTO) || 8)) return respuesta({ error: { message: "Demasiadas consultas seguidas. Esperá un minuto." } }, 429, cors.headers);
     const largo = Number(request.headers.get("content-length") || 0);
     if (largo > MAX_CUERPO) return respuesta({ error: { message: "La consulta es demasiado grande (¿muchas fotos?)." } }, 413, cors.headers);

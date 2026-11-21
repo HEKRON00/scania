@@ -184,7 +184,9 @@ test("clon que no maneja encabezados: sigue funcionando sin ellos", async () => 
 for (const [protocolo, nombre] of [["3", "ISO 9141-2"], ["5", "ISO 14230-4 KWP2000"], ["1", "SAE J1850 PWM"]]) {
   test(`protocolo viejo: ${nombre}`, async () => {
     const viejo = { ...MOTOR, "03": ["43 01 71 03 02 04 20"], "07": ["47 00 00 00 00 00 00"],
-      "0902": ["49 02 01 00 00 00 31", "49 02 02 48 47 43 4D", "49 02 03 38 32 36 33", "49 02 04 33 41 30 30", "49 02 05 34 33 35 32"] };
+      "0902": ["49 02 01 00 00 00 31", "49 02 02 48 47 43 4D", "49 02 03 38 32 36 33", "49 02 04 33 41 30 30", "49 02 05 34 33 35 32"],
+      // Modo 06 en formato no CAN (SAE J1979): 46 TID relleno + mapa; 46 TID TLTCID valor límite
+      "0600": ["46 00 FF 60 00 00 00"], "0602": ["46 02 01 00 40 00 30", "46 02 82 00 20 00 30"], "0603": ["46 03 01 00 10 00 30"] };
     const t = new ELMFalso({ protocolo, ecus: { "7E8": viejo } });
     const elm = new S.ELM327(t);
     await elm.conectar();
@@ -194,8 +196,12 @@ for (const [protocolo, nombre] of [["3", "ISO 9141-2"], ["5", "ISO 14230-4 KWP20
     assert.deepEqual((await elm.leerCodigos()).map((c) => c.codigo).sort(), ["P0171", "P0302", "P0420"]);
     assert.equal((await elm.muestra()).rpm, 1726);
     const p6 = await elm.leerPruebas06();
-    assert.equal(p6.disponible, false);
-    assert.match(p6.motivo, /CAN/);
+    assert.equal(p6.disponible, true, "modo 06 también fuera de CAN (A-05)");
+    assert.equal(p6.formato, "no_can");
+    assert.deepEqual(p6.pruebas.map((x) => [x.tid, x.cid, x.tipo_limite, x.valor, x.limite, x.ok]),
+      [[2, 1, "max", 64, 48, false], [2, 2, "min", 32, 48, false], [3, 1, "max", 16, 48, true]]);
+    assert.equal(p6.fallidas.length, 2);
+    assert.ok(p6.pruebas.every((x) => x.estandar === false && x.crudo), "se muestran los valores originales, sin inventar significado");
     assert.ok(!t.enviados.includes("ATH1"), "no se activan encabezados fuera de CAN");
   });
 }

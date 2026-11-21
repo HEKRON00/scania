@@ -37,18 +37,24 @@ test("decodificación de bytes de códigos y estado", () => {
 });
 
 test("PIDs: fórmulas SAE y metadatos", () => {
-  const P = Object.fromEntries(S.PIDS.map((p) => [p.clave, p]));
+  const P = Object.fromEntries([...S.PIDS, ...S.entradasO2("13")].map((p) => [p.clave, p]));
   assert.equal(P.rpm.f(0x1a, 0xf8), 1726);
   assert.equal(P.temp_motor.f(0x7b), 83);
   assert.equal(Math.round(P.ltft1.f(0x95) * 100) / 100, 16.41);
   assert.equal(P.maf.f(0x01, 0x90), 4);
   assert.equal(Math.round(P.o2_b1s1.f(0x5a) * 1000) / 1000, 0.45);
+  assert.ok(Number.isNaN(P.o2_b1s1_trim.f(0x5a, 0xff)), "B = FF: el sensor no se usa para el ajuste (no es 0%)");
+  assert.equal(P.o2_b1s1_trim.f(0x5a, 0x80), 0);
   assert.equal(P.voltaje.f(0x37, 0x80), 14.208);
   assert.equal(Math.round(P.lambda_b1s1.f(0x80, 0x00, 0x80, 0x00) * 1000) / 1000, 1, "λ = 1 con 0x8000");
-  for (const p of S.PIDS) {
+  assert.equal(P.af_ma_b1s1.f(0x80, 0, 0x80, 0x00), 0, "corriente 0 mA con 0x8000");
+  assert.equal(Math.round(P.af_v_b1s1.f(0x80, 0, 0x40, 0x00) * 1000) / 1000, 2, "voltaje A/F: 8/65536·(256C+D)");
+  assert.equal(P.egr_error.f(0x80), 0);
+  assert.equal(P.evap_presion.f(0xff, 0xfc), -1, "presión EVAP con signo");
+  for (const p of [...S.PIDS, ...S.entradasO2("13"), ...S.entradasO2("1D")]) {
     assert.ok(p.nombre && typeof p.f === "function", p.clave);
     assert.ok(S.META[p.clave], `metadatos de ${p.clave}`);
-    assert.equal(S.LARGO_PID[p.pid] || p.n, p.n, `largo de ${p.clave}`);
+    assert.equal(S.LARGO_PID[p.pid], p.n, `largo de ${p.clave}`);
   }
   assert.ok(S.lazoCerrado(2) && !S.lazoCerrado(1) && !S.lazoCerrado(4));
   assert.match(S.textoSistemaComb(2), /cerrado/i);
@@ -184,39 +190,59 @@ test("comparación de escaneos y revisión de carro usado", () => {
   assert.ok(!r.puntos.some((p) => /seguro|garantiz/i.test(p.texto) && /borr/.test(p.texto)), "no promete detectar el borrado con certeza");
 });
 
-test("pruebas guiadas: cada una documentada y con evaluación coherente", () => {
+test("pruebas guiadas: las 8 partes, sin pruebas manejando y evaluación coherente", () => {
+  const ctx = { cilindrada: 1.8, medicion: "MAF", fuente: { usaATRV: true } };
   for (const p of S.PRUEBAS_GUIADAS) {
-    for (const k of ["titulo", "descripcion", "herramientas", "condiciones", "dificultad", "riesgo", "referencia"]) assert.ok(p[k], `${p.id}.${k}`);
-    assert.ok(p.siguiente.ok && p.siguiente.regular && p.siguiente.mal, `${p.id}: siguiente paso`);
-    assert.ok(p.pasos.length >= 1);
-    if (p.riesgo === "alto") assert.ok(p.advertencia, `${p.id}: advertencia de riesgo`);
-    assert.equal(p.evaluar({}, { cilindrada: 1.8 }).veredicto, "error", `${p.id}: sin datos no inventa un resultado`);
+    for (const k of ["titulo", "descripcion", "preparacion", "herramientas", "condiciones", "referencia", "interpretacion", "dificultad", "riesgo"]) assert.ok(p[k], `${p.id}.${k}`);
+    assert.ok(p.siguiente.ok && p.siguiente.regular && p.siguiente.mal, `${p.id}: próxima prueba`);
+    assert.ok(p.pasos.length >= 1 && S.GRUPOS_PRUEBAS[p.grupo], p.id);
+    if (p.riesgo !== "bajo") assert.ok(p.advertencia, `${p.id}: advertencia de riesgo`);
+    const texto = JSON.stringify(p.pasos.map((x) => x.texto)) + p.preparacion + p.condiciones;
+    assert.ok(!/\b(en marcha|2da|3ra|manej(á|a) (a fondo|y)|mientras manej)/i.test(texto), `${p.id}: ninguna prueba se hace manejando`);
+    assert.ok(["error", "no_concluyente"].includes(p.evaluar({}, ctx).veredicto), `${p.id}: sin datos no inventa un resultado`);
   }
   const P = Object.fromEntries(S.PRUEBAS_GUIADAS.map((p) => [p.id, p]));
-  const bat = P.bateria.evaluar({ reposo: [12.6, 12.6, 12.61], arranque: [12.5, 10.4, 10.2, 10.6, 13.9, 14.1, 14.2, 14.1] });
-  assert.equal(bat.veredicto, "ok");
-  const debil = P.bateria.evaluar({ reposo: [12.1, 12.1], arranque: [12.0, 9.1, 9.0, 9.4, 13.9, 14.0, 14.1, 14.0] });
-  assert.equal(debil.veredicto, "mal");
+  assert.equal(P.bateria.evaluar({ reposo: [12.6, 12.6, 12.61] }, ctx).veredicto, "ok");
+  assert.equal(P.bateria.evaluar({ reposo: [12.1, 12.1] }, ctx).veredicto, "mal");
+  assert.equal(P.bateria.evaluar({ reposo: [14.1, 14.1] }, ctx).veredicto, "no_concluyente", "motor encendido: no es reposo");
+  // 5 lecturas por segundo durante 10 s: 1 s antes, ~1.6 s de arranque, después cargando
+  const arr = (min) => [...Array(5).fill(12.5), min, min + 0.1, min + 0.2, min + 0.3, min + 0.3, min + 0.4, min + 0.5, min + 0.7, 12.0, 13.5, ...Array(35).fill(14.1)];
+  assert.equal(P.arranque.evaluar({ antes: [12.6, 12.6], arranque: arr(10.2) }, ctx).veredicto, "ok");
+  assert.equal(P.arranque.evaluar({ antes: [12.1, 12.1], arranque: arr(8.9) }, ctx).veredicto, "mal");
   const m = (v) => ({ voltaje: v, rpm: 800 });
   assert.equal(P.alternador.evaluar({ sin_carga: [m(14.1)], con_carga: [m(13.6)], carga_rpm: [m(13.9)] }).veredicto, "ok");
   assert.equal(P.alternador.evaluar({ sin_carga: [m(12.6)], con_carga: [m(12.1)], carga_rpm: [m(12.3)] }).veredicto, "mal");
   assert.equal(P.alternador.evaluar({ sin_carga: [m(15.4)], con_carga: [m(15.2)], carga_rpm: [m(15.3)] }).veredicto, "mal", "sobrecarga");
-  const t = (s, l) => ({ stft1: s, ltft1: l });
-  assert.match(P.mezcla.evaluar({ ralenti: [t(10, 8)], alto: [t(0, 2)] }).resumen, /vacío/);
-  assert.match(P.mezcla.evaluar({ ralenti: [t(1, 2)], alto: [t(10, 6)] }).resumen, /combustible/i);
-  assert.equal(P.mezcla.evaluar({ ralenti: [t(1, 2)], alto: [t(0, 2)] }).veredicto, "ok");
-  // O2: sano cambia rápido, lento casi no cambia
-  const o2 = (n, amp) => Array.from({ length: 60 }, (_, i) => ({ t: i / 6, v: 0.45 + amp * Math.sin((i / 6) * 2 * Math.PI * n / 10) }));
-  assert.equal(P.o2.evaluar({ o2: o2(6, 0.4) }).veredicto, "ok");
-  assert.equal(P.o2.evaluar({ o2: o2(0.5, 0.05) }).veredicto, "mal");
-  // Eficiencia volumétrica: 1.8 L a 4000 rpm con 56 g/s ≈ 85 %
+  assert.equal(P.caida_voltaje.evaluar({ positivo: 0.3, tierra: 0.1 }).veredicto, "ok");
+  assert.equal(P.caida_voltaje.evaluar({ positivo: 1.2, tierra: 0.1 }).veredicto, "mal");
+  const t = (s, l) => ({ stft1: s, ltft1: l, sistema_comb: 2 });
+  assert.match(P.mezcla.evaluar({ ralenti: [t(10, 8)], alto: [t(0, 2)] }, { medicion: "MAF" }).resumen, /aire falsa/);
+  assert.match(P.mezcla.evaluar({ ralenti: [t(10, 8)], alto: [t(0, 2)] }, { medicion: "MAP" }).resumen, /escape/, "motor con MAP: primero escape y sensor MAP");
+  assert.match(P.mezcla.evaluar({ ralenti: [t(1, 2)], alto: [t(10, 6)] }, ctx).resumen, /combustible/i);
+  assert.equal(P.mezcla.evaluar({ ralenti: [t(1, 2)], alto: [t(0, 2)] }, ctx).veredicto, "ok");
+  // O2: sano y rápido = ok; con pocas lecturas por segundo = no concluyente (A-10)
+  const o2 = (n, amp, hz) => Array.from({ length: Math.round(10 * hz) }, (_, i) => ({ t: i / hz, v: 0.45 + amp * Math.sin((i / hz) * 2 * Math.PI * n / 10) }));
+  assert.equal(P.o2.evaluar({ o2: o2(6, 0.4, 8) }).veredicto, "ok");
+  assert.equal(P.o2.evaluar({ o2: o2(0.5, 0.05, 8) }).veredicto, "mal");
+  assert.equal(P.o2.evaluar({ o2: o2(6, 0.4, 2) }).veredicto, "no_concluyente", "2 lecturas/s no alcanzan para contar cambios");
   const ve = S.eficienciaVolumetrica({ maf: 56, rpm: 4000, temp_admision: 34, map: 95 }, 1.8);
   assert.ok(ve > 80 && ve < 90, `VE ${ve}`);
-  assert.equal(P.eficiencia.requiere({ pidsDisponibles: () => ["maf", "rpm", "temp_admision"] }, {}), "Falta la cilindrada del motor (ej. 1.8). Agregala en Carros → tu carro.");
-  const cal = P.calentamiento.evaluar({ temp: Array.from({ length: 30 }, (_, i) => ({ t: i * 30, temp_motor: 40 + i * 2 })) });
-  assert.equal(cal.veredicto, "ok");
-  const term = P.calentamiento.evaluar({ temp: Array.from({ length: 31 }, (_, i) => ({ t: i * 30, temp_motor: Math.min(70, 40 + i * 2) })) });
-  assert.equal(term.veredicto, "mal");
+  assert.match(P.maf_map.requiere({ pidsDisponibles: () => ["map", "rpm", "temp_admision"] }, { cilindrada: 2 }), /MAF/, "motor sin MAF: no aplica");
+  const ral = (rpm, map) => Array.from({ length: 30 }, (_, i) => ({ rpm: rpm + (i % 2 ? 10 : -10), map }));
+  assert.equal(P.ralenti.evaluar({ ralenti: ral(780, 32) }, { baro: 90 }).veredicto, "ok");
+  assert.equal(P.ralenti.evaluar({ ralenti: ral(780, 52) }, { baro: 90 }).veredicto, "mal", "poco vacío");
+  // Termostato por la forma de la curva (A-24)
+  const curva = (f) => Array.from({ length: 41 }, (_, i) => ({ t: i * 30, temp_motor: f(i * 30) }));
+  assert.equal(P.calentamiento.evaluar({ temp: curva((s) => 30 + s * 0.08) }).veredicto, "ok");
+  assert.equal(P.calentamiento.evaluar({ temp: curva((s) => Math.min(66, 30 + s * 0.08)) }).veredicto, "mal", "meseta baja");
+  assert.equal(P.calentamiento.evaluar({ temp: curva((s) => 30 + s * 0.035).slice(0, 25) }).veredicto, "no_concluyente", "sube lento: no se condena");
+  const marca = { muestras: Array.from({ length: 40 }, (_, i) => ({ t: i * 10, temp_motor: i < 20 ? 90 + i * 0.5 : 100 - (i - 20) * 0.3 })), marcas: [195] };
+  assert.equal(P.refrigeracion.evaluar({ vent: marca }).veredicto, "ok");
+  assert.equal(P.sensores.evaluar({ koeo: [{ rpm: 0, temp_motor: 27, temp_admision: 26, map: 90, baro: 90 }] }, {}).veredicto, "ok");
+  assert.equal(P.sensores.evaluar({ koeo: [{ rpm: 0, temp_motor: 27, temp_admision: 45, map: 90, baro: 90 }] }, {}).veredicto, "mal");
+  assert.equal(P.compresion.evaluar({ c1: 180, c2: 175, c3: 178, c4: 120 }).veredicto, "mal");
+  assert.equal(P.presion_combustible.evaluar({ medida: 40 }).veredicto, "no_concluyente", "sin el valor del manual no se inventa uno");
+  assert.equal(P.presion_combustible.evaluar({ medida: 40, espec: 42 }).veredicto, "ok");
 });
 
 test("almacenamiento local: carros, mantenimiento, escaneos, respaldo", () => {
