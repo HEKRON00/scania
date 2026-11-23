@@ -229,7 +229,7 @@
       `<p class="nota">Elegí o agregá el carro en <a href="#carros">Carros</a>: con marca, modelo, año y motor el diagnóstico es mucho más preciso.</p>`;
     const listo = E.ajustes.servidor && E.ajustes.codigo;
     $("#btn-ia").disabled = !listo;
-    if (!listo) $("#ia-estado").innerHTML = `Configurá el servidor de IA en <a href="#" id="ia-ajustes">⚙ Ajustes</a>. Sin IA, el análisis local sigue funcionando.`;
+    if (!listo) $("#ia-estado").innerHTML = `La IA todavía no está configurada. Hacen falta dos cosas: <b>1)</b> una clave de la API de Anthropic con saldo (es de pago y aparte de la suscripción de Claude) y <b>2)</b> tu servidor gratis en Cloudflare con esa clave (<a href="https://github.com/HEKRON00/scania/blob/main/servidor/LEEME.md" target="_blank" rel="noopener">guía paso a paso</a>). Después pegás la dirección y el código familiar en <a href="#" id="ia-ajustes">⚙ Ajustes</a>. Sin IA, el escáner y el análisis local funcionan igual.`;
     const l = $("#ia-ajustes"); if (l) l.onclick = (e) => { e.preventDefault(); U.abrirAjustes(); };
   }
   U.dibujarCarroIA = dibujarCarro;

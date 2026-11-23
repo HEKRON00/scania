@@ -164,7 +164,10 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
         body: JSON.stringify(cuerpo || {}),
       });
     } catch (e) {
-      throw new S.ErrorIA("No se pudo llegar al servidor de IA (¿hay internet? ¿la dirección está bien?). El escáner y el análisis local siguen funcionando sin internet.");
+      const comoArchivo = typeof location !== "undefined" && location.protocol === "file:";
+      throw new S.ErrorIA("No se pudo llegar al servidor de IA (¿hay internet? ¿la dirección está bien?)." +
+        (comoArchivo ? " Abriste ScanIA como archivo: el servidor solo acepta tu sitio. Usá el enlace de GitHub Pages o agregá ,null a ORIGENES en Cloudflare." : "") +
+        " El escáner y el análisis local siguen funcionando sin internet.");
     }
     let datos = {};
     try { datos = await resp.json(); } catch (e) { /* sin cuerpo */ }
