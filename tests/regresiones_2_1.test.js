@@ -329,3 +329,15 @@ test("A-21 · cada diagnóstico trae urgencia; los de datos en vivo dicen en qu�
   assert.ok(pobre, a.hallazgos.map((x) => x.id).join(","));
   assert.ok(pobre.condiciones && pobre.condiciones.length, "dice en qué condiciones se midió");
 });
+
+test("Prueba física · los textos de las pruebas guiadas no quedan cortados a media frase", () => {
+  const corte = /(?:^|\s)(de|del|la|las|el|los|y|o|en|con|por|para|que|un|una|al|a|se|sin|si|últimos|primeros|cada|entre|desde|hasta|como|más|menos)$/i;
+  for (const p of S.PRUEBAS_GUIADAS) {
+    for (const k of ["preparacion", "herramientas", "condiciones", "referencia", "interpretacion", "siguiente", "advertencia"]) {
+      const t = p[k];
+      if (typeof t !== "string" || !t) continue;
+      assert.ok(!corte.test(t.trim()), `${p.id}.${k} termina cortado: «…${t.slice(-40)}»`);
+    }
+    for (const paso of p.pasos || []) if (typeof paso.texto === "string") assert.ok(!corte.test(paso.texto.trim()), `${p.id} paso cortado: «…${paso.texto.slice(-40)}»`);
+  }
+});

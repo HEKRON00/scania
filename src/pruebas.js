@@ -251,7 +251,7 @@
       descripcion: "Lee los contadores internos de la computadora para ver si algún cilindro falla, aunque todavía no haya código.",
       preparacion: "Ideal después de usar el carro normalmente unos 15–20 minutos (la computadora cuenta los fallos mientras el motor trabaja). Leé con el carro estacionado.",
       herramientas: "Solo el escáner",
-      condiciones: "Carro estacionado; los contadores son del último ciclo de manejo y del promedio de los últimos",
+      condiciones: "Carro estacionado; los contadores son del último ciclo de manejo y del promedio de los últimos 10 ciclos (solo los carros CAN los reportan de forma estándar)",
       dificultad: "fácil", riesgo: "bajo", donde: "casa",
       referencia: "Unos pocos fallos por cilindro pueden ser normales. Un cilindro con muchos más que los demás indica un problema en ese cilindro. Solo los carros CAN (la mayoría desde ~2008) reportan estos contadores de forma estándar.",
       interpretacion: "La computadora dice QUÉ cilindro falla, no QUÉ pieza: se separa intercambiando bujía y bobina (o cable de bujía si el motor tiene distribuidor) con otro cilindro.",

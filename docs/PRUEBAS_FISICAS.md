@@ -96,3 +96,11 @@ Opcionales (con resultados del taller): **Compresión** y **Presión de combusti
 4. El respaldo de ScanIA (*Más → Respaldo → Descargar respaldo*), si querés que se revisen los escaneos guardados.
 
 Con eso se corrigen los detalles reales de tus adaptadores y del CR-V, y recién ahí se puede actualizar la columna *Prueba física* del README.
+
+---
+
+## Registro de resultados reales
+
+| Fecha | Equipo | Carro | Lo que se observó | Estado |
+|---|---|---|---|---|
+| 2026-11-22 | Laptop con Windows (adaptador sin identificar todavía) | Carro real; según el contexto, el Honda CR-V (falta confirmar) | Conectó y leyó 7 códigos (P0300, P0301, P0303, P0304, P0730, P0135 y uno más). La prueba "Fallos de encendido" dio **no concluyente** por ser protocolo no CAN, como corresponde, y avisó de 2 resultados fuera de límite en el modo 06. Se encontró un texto cortado en las condiciones de esa prueba (corregido). | CR-07 y lectura de modo 06 no CAN: **funcionan en un carro real** (pendiente confirmar modelo y adaptador para marcarlas como aprobadas) |
