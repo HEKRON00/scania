@@ -4901,7 +4901,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       condiciones: "Midiendo MIENTRAS el ayudante da arranque (puntas del multímetro bien sujetas)",
       dificultad: "media", riesgo: "medio", donde: "ambos",
       advertencia: "Durante el arranque hay piezas que se mueven (faja, ventilador, poleas). Mantené manos, cables y ropa lejos. Si el motor de arranque o la tierra quedan en un lugar difícil o debajo del carro, pedile a un mecánico que haga esta medición.",
-      referencia: "Regla común de taller durante el arranque: menos de ~0.5 V en el lado positivo (borne + al terminal grueso del motor de arranque) y menos de ~0.3 V en la tierra (borne − al bloque del motor). Más que eso indica resistencia de más.",
+      referencia: "Guía general de taller (orientativa, no es una especificación del fabricante; si tu manual da otro valor, ese manda) durante el arranque: menos de ~0.5 V en el lado positivo (borne + al terminal grueso del motor de arranque) y menos de ~0.3 V en la tierra (borne − al bloque del motor). Más que eso indica resistencia de más.",
       interpretacion: "Una caída alta en el positivo apunta al cable o al borne positivo; en la tierra, al cable de tierra o su unión al chasis/motor. No es la batería ni el motor de arranque en sí.",
       siguiente: { ok: "Los cables están bien: si el arranque es débil, probá la batería con carga y el motor de arranque.", regular: "Limpiá y apretá las uniones; repetí.", mal: "Limpiá o cambiá el cable o la tierra con caída alta y repetí la prueba 'Arranque'." },
       requiere: () => null,
@@ -8656,11 +8656,12 @@ Reglas:
       guardar({ fusibles: fus }); U.toast(`Anotado en ${s.id} como dato de foto (sin confirmar).`); dibujarFotos();
     }));
   }
+  const ESTADO_VISUAL = { sin_dano_visible: "sin daño visible", filamento_cortado_visible: "filamento cortado visible", derretido_o_quemado: "derretido o quemado", sulfato: "sulfato", flojo_o_fuera_de_lugar: "flojo o fuera de lugar", no_se_ve: "no se ve" };
   const CERT_TXT = { confirmada: "Identificación visual confirmada", probable: "Identificación probable", insuficiente: "Imagen insuficiente", requiere_fisica: "Requiere inspección física" };
   function htmlAnalisisFoto(a, k) {
     const sug = S.sugerenciasDeFoto(a, variante(), (datos().fotos[k] || {}).caja);
     return `<div class="el-ia">${a.error ? `<p class="advertencia">${esc(a.error)}</p>` : ""}${a.que_se_ve ? `<p>${esc(a.que_se_ve)}</p>` : ""}
-      ${["confirmada", "probable", "insuficiente", "requiere_fisica"].map((c) => { const el = a.elementos.filter((e) => e.certeza === c); return el.length ? `<p><b>${CERT_TXT[c]}:</b></p><ul>${el.map((e) => `<li>${esc(e.tipo)} ${esc(e.posicion)}${e.amperaje_visto != null ? ` · ${e.amperaje_visto} A` : ""}${e.color_visto ? ` · ${esc(e.color_visto)}` : ""} · ${esc(e.estado_visual.replace(/_/g, " "))}${e.nota ? ` — ${esc(e.nota)}` : ""}</li>`).join("")}</ul>` : ""; }).join("")}
+      ${["confirmada", "probable", "insuficiente", "requiere_fisica"].map((c) => { const el = a.elementos.filter((e) => e.certeza === c); return el.length ? `<p><b>${CERT_TXT[c]}:</b></p><ul>${el.map((e) => `<li>${esc(e.tipo)} ${esc(e.posicion)}${e.amperaje_visto != null ? ` · ${e.amperaje_visto} A` : ""}${e.color_visto ? ` · ${esc(e.color_visto)}` : ""} · ${esc(ESTADO_VISUAL[e.estado_visual] || e.estado_visual.replace(/_/g, " "))}${e.nota ? ` — ${esc(e.nota)}` : ""}</li>`).join("")}</ul>` : ""; }).join("")}
       ${a.comparacion.length ? `<p><b>Comparación con la documentación:</b></p><ul>${a.comparacion.map((c) => `<li>${esc(c.posicion)}: documentado ${esc(c.documentado)} · visto ${esc(c.visto)} · ${c.coincide === true ? "coincide" : c.coincide === false ? "NO coincide" : "no se puede saber"} (${esc(CERT_TXT[c.certeza] || c.certeza)})</li>`).join("")}</ul>` : ""}
       ${a.limitaciones.length ? `<p class="nota">${esc(a.limitaciones.join(" "))}</p>` : ""}${a.siguiente ? `<p><b>Siguiente:</b> ${esc(a.siguiente)}</p>` : ""}
       ${sug.length ? `<p><b>Anotar en la inspección (como dato de foto, sin confirmar):</b></p>${sug.map((s, j) => `<div><button class="btn" data-fo-aplicar="${k}:${j}">${esc(s.id)}</button> ${esc(s.texto)} <span class="nota">(${esc(CERT_TXT[s.certeza] || s.certeza)})</span></div>`).join("")}` : ""}</div>`;
@@ -9240,7 +9241,7 @@ Reglas:
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, $$ = U.$$, esc = U.esc;
-  S.VERSION = "2.1.0";
+  S.VERSION = "3.0.0";
 
   // ================================================================== barra superior y selector de carro
   function dibujarBarra() {

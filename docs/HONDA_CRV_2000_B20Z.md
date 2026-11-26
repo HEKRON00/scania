@@ -62,6 +62,10 @@ Perfil de ScanIA: `honda_crv_1g` en `src/perfiles.js` (Honda CR-V 1997–2001, m
 
 En *Carros → Editar → Datos del manual*: ralentí caliente (rpm), temperatura de apertura del termostato, temperatura de encendido del ventilador, compresión mínima por cilindro y presión de combustible (con su condición de medición). **ScanIA no trae estos valores**: si no los anotás, las pruebas usan rangos generales y lo dicen.
 
+## 5b. Fusibles, relés y sistema eléctrico
+
+La ficha eléctrica de este carro (fusibles de las cajas interior, del motor y del ABS, relés conocidos y fuentes) está en la sección **Eléctrico** de la app y documentada en [DIAGNOSTICO_ELECTRICO.md](DIAGNOSTICO_ELECTRICO.md) y [COMPATIBILIDAD_ELECTRICA_VEHICULOS.md](COMPATIBILIDAD_ELECTRICA_VEHICULOS.md). Es de fuentes secundarias para EE. UU./Canadá: compará cada posición con la etiqueta de la tapa de tu caja.
+
 ## 6. Primera conexión con el CR-V (paso a paso)
 
 1. Motor apagado, llave en ON (sin dar arranque). Adaptador en el conector de 16 pines, luz del adaptador encendida.

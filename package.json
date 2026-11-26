@@ -1,6 +1,6 @@
 {
   "name": "scania",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "private": true,
   "description": "ScanIA: escáner OBD2 (ELM327) con diagnóstico por evidencia e IA opcional. Web app sin dependencias.",
   "scripts": {

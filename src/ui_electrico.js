@@ -458,11 +458,12 @@
       guardar({ fusibles: fus }); U.toast(`Anotado en ${s.id} como dato de foto (sin confirmar).`); dibujarFotos();
     }));
   }
+  const ESTADO_VISUAL = { sin_dano_visible: "sin daño visible", filamento_cortado_visible: "filamento cortado visible", derretido_o_quemado: "derretido o quemado", sulfato: "sulfato", flojo_o_fuera_de_lugar: "flojo o fuera de lugar", no_se_ve: "no se ve" };
   const CERT_TXT = { confirmada: "Identificación visual confirmada", probable: "Identificación probable", insuficiente: "Imagen insuficiente", requiere_fisica: "Requiere inspección física" };
   function htmlAnalisisFoto(a, k) {
     const sug = S.sugerenciasDeFoto(a, variante(), (datos().fotos[k] || {}).caja);
     return `<div class="el-ia">${a.error ? `<p class="advertencia">${esc(a.error)}</p>` : ""}${a.que_se_ve ? `<p>${esc(a.que_se_ve)}</p>` : ""}
-      ${["confirmada", "probable", "insuficiente", "requiere_fisica"].map((c) => { const el = a.elementos.filter((e) => e.certeza === c); return el.length ? `<p><b>${CERT_TXT[c]}:</b></p><ul>${el.map((e) => `<li>${esc(e.tipo)} ${esc(e.posicion)}${e.amperaje_visto != null ? ` · ${e.amperaje_visto} A` : ""}${e.color_visto ? ` · ${esc(e.color_visto)}` : ""} · ${esc(e.estado_visual.replace(/_/g, " "))}${e.nota ? ` — ${esc(e.nota)}` : ""}</li>`).join("")}</ul>` : ""; }).join("")}
+      ${["confirmada", "probable", "insuficiente", "requiere_fisica"].map((c) => { const el = a.elementos.filter((e) => e.certeza === c); return el.length ? `<p><b>${CERT_TXT[c]}:</b></p><ul>${el.map((e) => `<li>${esc(e.tipo)} ${esc(e.posicion)}${e.amperaje_visto != null ? ` · ${e.amperaje_visto} A` : ""}${e.color_visto ? ` · ${esc(e.color_visto)}` : ""} · ${esc(ESTADO_VISUAL[e.estado_visual] || e.estado_visual.replace(/_/g, " "))}${e.nota ? ` — ${esc(e.nota)}` : ""}</li>`).join("")}</ul>` : ""; }).join("")}
       ${a.comparacion.length ? `<p><b>Comparación con la documentación:</b></p><ul>${a.comparacion.map((c) => `<li>${esc(c.posicion)}: documentado ${esc(c.documentado)} · visto ${esc(c.visto)} · ${c.coincide === true ? "coincide" : c.coincide === false ? "NO coincide" : "no se puede saber"} (${esc(CERT_TXT[c.certeza] || c.certeza)})</li>`).join("")}</ul>` : ""}
       ${a.limitaciones.length ? `<p class="nota">${esc(a.limitaciones.join(" "))}</p>` : ""}${a.siguiente ? `<p><b>Siguiente:</b> ${esc(a.siguiente)}</p>` : ""}
       ${sug.length ? `<p><b>Anotar en la inspección (como dato de foto, sin confirmar):</b></p>${sug.map((s, j) => `<div><button class="btn" data-fo-aplicar="${k}:${j}">${esc(s.id)}</button> ${esc(s.texto)} <span class="nota">(${esc(CERT_TXT[s.certeza] || s.certeza)})</span></div>`).join("")}` : ""}</div>`;

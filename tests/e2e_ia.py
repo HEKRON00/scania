@@ -9,6 +9,13 @@ DIAG = {"resumen": "Hay fallos de encendido en el cilindro 2 con evidencia del c
     "alternativas": ["Inyector"], "prueba": {"descripcion": "Intercambiá la bobina 2 con la 3 y repetí la prueba de fallos.", "resultado_esperado": "Si el fallo pasa al 3, es la bobina.", "herramientas": ["llave 10 mm"], "donde": "casa", "riesgo": "bajo"},
     "no_reemplazar": "El catalizador ni la computadora."}],
   "siguiente_paso": "Intercambiar bobinas 2 y 3.", "evidencias_clave": ["P0302 almacenado", "P0420 del catalizador"], "limitaciones": ["Sin prueba de compresión."], "descartado": [], "datos_a_vigilar": ["Contador de fallos"], "preguntas": ["¿Cuándo cambiaste las bujías?"], "fallas_conocidas": [], "nota_seguridad": ""}
+FOTO = {"que_se_ve": "Caja de fusibles interior con la tapa quitada", "etiqueta_tapa": [],
+  "elementos": [{"posicion": "26", "tipo": "fusible", "amperaje_visto": 20, "color_visto": "amarillo", "estado_visual": "filamento_cortado_visible", "certeza": "confirmada", "nota": "se ve el hilo cortado"},
+                {"posicion": "11", "tipo": "fusible", "amperaje_visto": 20, "estado_visual": "sin_dano_visible", "certeza": "probable", "nota": "número tapado"},
+                {"posicion": "", "tipo": "fusible", "estado_visual": "no_se_ve", "certeza": "insuficiente", "nota": "fila de abajo borrosa"}],
+  "comparacion": [{"posicion": "26", "documentado": "20 A limpiaparabrisas", "visto": "20 A", "coincide": True, "certeza": "probable"}],
+  "limitaciones": ["La foto no muestra la etiqueta de la tapa."], "siguiente": "Medí continuidad del 26 fuera de la caja."}
+
 async def main():
     srv = subprocess.Popen([sys.executable, "-m", "http.server", "8767", "--bind", "127.0.0.1"], cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.6)
@@ -23,7 +30,10 @@ async def main():
             pedidos.append({"url": req.url, "headers": req.headers, "body": cuerpo})
             if req.url.endswith("/v1/probar"):
                 await route.fulfill(status=200, headers={"access-control-allow-origin": "*"}, body='{"ok":true}'); return
-            texto = json.dumps(DIAG, ensure_ascii=False) if len(cuerpo.get("messages", [])) == 1 else "Sí: primero intercambiá las bobinas. Si el fallo se muda, cambiá la bobina."
+            if "cajas de fusibles" in (cuerpo.get("system") or ""):
+                texto = json.dumps(FOTO, ensure_ascii=False)
+            else:
+                texto = json.dumps(DIAG, ensure_ascii=False) if len(cuerpo.get("messages", [])) == 1 else "Sí: primero intercambiá las bobinas. Si el fallo se muda, cambiá la bobina."
             await route.fulfill(status=200, headers={"access-control-allow-origin": "*", "content-type": "application/json"},
                 body=json.dumps({"content": [{"type": "text", "text": texto}], "stop_reason": "end_turn"}))
         await pg.route("https://ia.ejemplo.dev/**", ruta)
@@ -62,6 +72,27 @@ async def main():
         assert "1HGCM82633A004352" not in prim, "el VIN no debe salir sin permiso"
         assert "x-api-key" not in d["headers"], "la app nunca manda una clave de Anthropic"
         assert d["headers"].get("x-codigo-familiar") == "codigo-familiar-123"
+        # ---- Sistema eléctrico: foto de la caja revisada por la IA (servidor falso)
+        await pg.click('#nav button[data-vista="escanear"]'); await pg.click("#btn-desconectar")
+        await pg.evaluate("""() => { const id = ScanIA.almacen.guardarCarro({marca:'Honda', modelo:'CR-V', anio:'2000', vin:'JHLRD1863YC000001'}); ScanIA.almacen.elegirCarro(id); ScanIA.ui.emit('carro'); }""")
+        await pg.click('#nav button[data-vista="electrico"]'); await pg.click('.el-tab[data-elp="fotos"]')
+        foto = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capturas", "ia.png")
+        await pg.set_input_files("#fo-archivo", foto); await pg.click("#fo-guardar"); await pg.wait_for_selector("[data-fo-ia]")
+        await pg.click("[data-fo-ia]"); await pg.wait_for_selector(".el-ia", timeout=20000)
+        an = await pg.inner_text(".el-ia")
+        print("foto IA:", an[:300].replace("\n", " | "))
+        assert "Requiere inspección física" in an and "Imagen insuficiente" in an and "Identificación probable" in an, "separa confirmado / probable / insuficiente / físico"
+        pf = pedidos[-1]
+        bloques = pf["body"]["messages"][0]["content"]
+        assert any(b.get("type") == "image" for b in bloques), "la foto se manda como imagen"
+        assert "JHLRD1863YC000001" not in json.dumps(pf["body"]), "el VIN no sale con la foto"
+        assert "Nunca digas que un fusible está quemado solo por la foto" in pf["body"]["system"]
+        await pg.click('[data-fo-aplicar^="0:"]')
+        await pg.click('.el-tab[data-elp="fusibles"]')
+        cls = await pg.get_attribute('[data-fus="INT-26"]', "class")
+        print("INT-26 tras la foto:", cls)
+        assert "naranja" in cls, "una foto deja el fusible como 'posiblemente quemado', no confirmado"
+        await pg.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "capturas", "electrico_foto_ia.png"), full_page=True)
         assert not err, err
         print("TODO BIEN")
         await b.close()

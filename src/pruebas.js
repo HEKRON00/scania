@@ -158,7 +158,7 @@
       condiciones: "Midiendo MIENTRAS el ayudante da arranque (puntas del multímetro bien sujetas)",
       dificultad: "media", riesgo: "medio", donde: "ambos",
       advertencia: "Durante el arranque hay piezas que se mueven (faja, ventilador, poleas). Mantené manos, cables y ropa lejos. Si el motor de arranque o la tierra quedan en un lugar difícil o debajo del carro, pedile a un mecánico que haga esta medición.",
-      referencia: "Regla común de taller durante el arranque: menos de ~0.5 V en el lado positivo (borne + al terminal grueso del motor de arranque) y menos de ~0.3 V en la tierra (borne − al bloque del motor). Más que eso indica resistencia de más.",
+      referencia: "Guía general de taller (orientativa, no es una especificación del fabricante; si tu manual da otro valor, ese manda) durante el arranque: menos de ~0.5 V en el lado positivo (borne + al terminal grueso del motor de arranque) y menos de ~0.3 V en la tierra (borne − al bloque del motor). Más que eso indica resistencia de más.",
       interpretacion: "Una caída alta en el positivo apunta al cable o al borne positivo; en la tierra, al cable de tierra o su unión al chasis/motor. No es la batería ni el motor de arranque en sí.",
       siguiente: { ok: "Los cables están bien: si el arranque es débil, probá la batería con carga y el motor de arranque.", regular: "Limpiá y apretá las uniones; repetí.", mal: "Limpiá o cambiá el cable o la tierra con caída alta y repetí la prueba 'Arranque'." },
       requiere: () => null,

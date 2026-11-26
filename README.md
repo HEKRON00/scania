@@ -1,8 +1,8 @@
 # ScanIA · escáner OBD2 con diagnóstico por evidencia
 
-ScanIA convierte un adaptador **ELM327** barato (Bluetooth) y un teléfono Android o una laptop con Windows en un escáner para revisar los carros de la familia. Lee códigos, datos en vivo, freeze frame, monitores y pruebas internas de la computadora; los relaciona entre sí con reglas locales que dicen **qué tan seguro** es cada hallazgo y **cómo confirmarlo antes de cambiar piezas**. La IA (Claude) es opcional y pasa por un servidor propio: la app funciona completa sin internet.
+ScanIA convierte un adaptador **ELM327** barato (Bluetooth) y un teléfono Android o una laptop con Windows en un escáner para revisar los carros de la familia. Desde la versión 3.0 también guía el **diagnóstico eléctrico**: fusibles, relés, mediciones con multímetro, batería y carga, sensores y actuadores, diagramas y fotos. Lee códigos, datos en vivo, freeze frame, monitores y pruebas internas de la computadora; los relaciona entre sí con reglas locales que dicen **qué tan seguro** es cada hallazgo y **cómo confirmarlo antes de cambiar piezas**. La IA (Claude) es opcional y pasa por un servidor propio: la app funciona completa sin internet.
 
-> **Estado: versión 2.1 lista para la prueba física.** Pasó 73 pruebas automáticas, una prueba de punta a punta de la interfaz en Chrome (escritorio y celular) y una de la pantalla de IA con un servidor falso. **Todavía no se probó con un carro real ni con los adaptadores físicos**: ninguna función aparece como probada físicamente. Plan de prueba: [docs/PRUEBAS_FISICAS.md](docs/PRUEBAS_FISICAS.md).
+> **Estado: versión 3.0.** Pasa 92 pruebas automáticas, una prueba de punta a punta de la interfaz en Chrome (escritorio y celular, 75 verificaciones) y una de la IA con un servidor falso. **Prueba física:** el 22/11/2026 ScanIA conectó con un carro real (no CAN) desde una laptop con Windows, leyó 7 códigos y las pruebas internas (falta confirmar modelo y adaptador para marcarlo como aprobado). **El módulo eléctrico no se ha probado con un carro ni con un multímetro.** Plan: [docs/PRUEBAS_FISICAS.md](docs/PRUEBAS_FISICAS.md).
 
 App publicada (cuando GitHub Pages esté activado): **https://hekron00.github.io/scania/**
 
@@ -12,7 +12,7 @@ App publicada (cuando GitHub Pages esté activado): **https://hekron00.github.io
 
 | Función | Implementada | Prueba automática | Prueba física | Limitaciones |
 |---|---|---|---|---|
-| Conexión ELM327 Bluetooth clásico (Web Serial) | Sí | Sí (ELM327 falso) | No probada | Android: Chrome 138+. Windows: Chrome 117+ (Edge esperado igual, sin confirmar). No funciona desde el navegador interno de otras apps ni en iPhone. |
+| Conexión ELM327 Bluetooth clásico (Web Serial) | Sí | Sí (ELM327 falso) | Funcionó 1 vez (22/11/2026, Windows, carro real no CAN); falta confirmar modelo y adaptador; Android no probada | Android: Chrome 138+. Windows: Chrome 117+ (Edge esperado igual, sin confirmar). No funciona desde el navegador interno de otras apps ni en iPhone. |
 | Conexión ELM327 BLE (Web Bluetooth) | Sí | Parcial | No probada | Solo adaptadores BLE con servicios serie comunes. Web Bluetooth **no** conecta Bluetooth clásico. |
 | Conexión USB (compu) | Sí | Sí | No probada | No en Android. |
 | Adaptador WiFi | No | — | — | El navegador no abre conexiones TCP. |
@@ -20,14 +20,14 @@ App publicada (cuando GitHub Pages esté activado): **https://hekron00.github.io
 | Detección de desconexión y de reinicio del adaptador | Sí | Sí | No probada | — |
 | Diagnóstico de conexión exportable | Sí | Sí (simulador) | No probada | — |
 | Protocolos CAN 11/29 bits | Sí | Sí | No probada | — |
-| Protocolos ISO 9141-2, KWP2000, J1850 | Sí | Sí (incluido adaptador virtual ISO 9141-2) | No probada | Un dato por consulta (más lento). |
+| Protocolos ISO 9141-2, KWP2000, J1850 | Sí | Sí (incluido adaptador virtual ISO 9141-2) | Funcionó 1 vez (22/11/2026, Windows, carro real no CAN); falta confirmar modelo y adaptador (protocolo exacto sin anotar) | Un dato por consulta (más lento). |
 | Modo 01 datos en vivo (solo los soportados; sin datos viejos ni imposibles) | Sí | Sí | No probada | — |
 | Sensores de oxígeno de todos los bancos (PID 13/1D), banda ancha | Sí | Sí | No probada | — |
 | Modo 02 freeze frame con su mapa | Sí | Sí | No probada | — |
-| Modos 03 / 07 / 0A (confirmados, pendientes, permanentes) | Sí | Sí | No probada | 0A raro en carros viejos. |
+| Modos 03 / 07 / 0A (confirmados, pendientes, permanentes) | Sí | Sí | Funcionó 1 vez (22/11/2026, Windows, carro real no CAN); falta confirmar modelo y adaptador: leyó 7 códigos | 0A raro en carros viejos. |
 | Modo 04 borrar códigos (con confirmación y escaneo guardado) | Sí | Sí | No probada | La computadora puede rechazarlo (se explica el motivo). |
 | Modo 06 en CAN (nombres y escalas estándar) | Sí | Sí | No probada | — |
-| Modo 06 en protocolos no CAN | Sí (valores originales) | Sí | No probada | Sin interpretación por componente: la define cada fabricante. |
+| Modo 06 en protocolos no CAN | Sí (valores originales) | Sí | Funcionó 1 vez (22/11/2026, Windows, carro real no CAN); falta confirmar modelo y adaptador: mostró 2 resultados fuera de límite | Sin interpretación por componente: la define cada fabricante. |
 | Modo 09 VIN / calibración | Sí | Sí | No probada | Muchos carros antes de ~2005 no entregan el VIN. |
 | Servicio $05 (O2 en no CAN) | No | — | — | Formato no verificado: no se inventó. |
 | Respuestas negativas 7F y errores del ELM327 | Sí | Sí | No probada | — |
@@ -44,6 +44,19 @@ App publicada (cuando GitHub Pages esté activado): **https://hekron00.github.io
 | IA con servidor propio (Cloudflare Worker) | Sí | Sí (servidor y Anthropic falsos) | No probada con la API real | Requiere desplegar el servidor y su clave. |
 | Revisión automática de la respuesta de la IA | Sí | Sí | No aplica | Detecta códigos o lecturas no leídos; no garantiza que el resto sea correcto. |
 | ABS, bolsas de aire, carrocería, datos propios de transmisión | No | — | — | No son OBD-II genérico. |
+| **Sistema eléctrico (3.0)** | | | | |
+| Ficha técnica por vehículo con fuentes y verificación | Sí (Honda CR-V 2000–2001 EE. UU./Canadá) | Sí | No probada | Fuentes secundarias; posiciones 4 y 5 del motor en conflicto; sin manual de servicio. |
+| Cajas de fusibles interactivas (interior, motor, ABS, principales, relés) | Sí | Sí | No probada | Representación orientativa (ordenada por número), no la disposición real. Relés sin posición documentada. |
+| Inspección de fusibles (quemado, ausente, amperaje, tipo, falso contacto, se vuelve a quemar, intercambios) | Sí | Sí | No probada | Lo confirma tu medición; a ojo o por foto queda "probable". |
+| Fusibles anotados desde la etiqueta de la tapa | Sí | Sí | No aplica | — |
+| Mediciones con multímetro (14 pruebas, 8 partes cada una) | Sí | Sí | No probada | Sin valor del manual: "Valor de referencia no disponible". |
+| Batería, arranque y carga combinando fuentes | Sí | Sí | No probada | El voltaje OBD solo es orientativo. |
+| Sensores y actuadores (16 componentes) | Sí | Sí | No probada | Tipos de sensor "más comunes": confirmar con el diagrama. |
+| Causa común eléctrica en el análisis | Sí | Sí | No probada | Son hipótesis hasta medir. |
+| Visor y búsqueda de diagramas | Sí (los que subas) | Sí | No aplica | ScanIA no trae diagramas del fabricante. |
+| Fotos con IA (confirmada / probable / insuficiente / física) | Sí | Sí (servidor falso) | No probada con la API real | Requiere el servidor de IA. |
+| Informe eléctrico PDF/JSON | Sí | Sí | No aplica | — |
+| 12 casos eléctricos + 6 fallas eléctricas en el simulador | Sí | Sí | No aplica | Simulación: no prueba el hardware. |
 
 ## Qué hace
 
@@ -54,6 +67,7 @@ App publicada (cuando GitHub Pages esté activado): **https://hekron00.github.io
 - **Diagnóstico local (sin internet)**: relaciona códigos (confirmados, pendientes, permanentes), freeze frame, lazo de combustible, ajustes de mezcla, MAF o MAP, vacío, O2 y banda ancha de todos los bancos, voltaje con motor encendido y apagado, temperaturas, modo 06 y síntomas. Cada hallazgo trae evidencia, condiciones de medición, referencia aplicable, certeza de la condición (*confirmada / sospecha / posibilidad*), urgencia, causas, qué no se puede distinguir solo con OBD, prueba para confirmar y qué **no** cambiar todavía. Sin porcentajes inventados.
 - **Pruebas guiadas** por sistema (eléctrico, motor y mezcla, refrigeración, sensores, taller), cada una con preparación, herramientas, procedimiento, condiciones, referencias, interpretación, resultado y próxima prueba. Ninguna pide manejar ni acelerar a fondo en marcha.
 - **Perfiles de vehículo**: el del Honda CR-V 1997–2001 separa lo que se ve por OBD genérico, lo que necesita el escáner de Honda y lo que necesita pruebas físicas. Ver [docs/HONDA_CRV_2000_B20Z.md](docs/HONDA_CRV_2000_B20Z.md).
+- **Sistema eléctrico** (3.0): fichas técnicas con fuentes, cajas de fusibles interactivas, inspección de fusibles y relés, mediciones con multímetro sin valores inventados, batería/arranque/carga, sensores y actuadores, causa común, diagramas propios, fotos con IA e informe. Ver [docs/DIAGNOSTICO_ELECTRICO.md](docs/DIAGNOSTICO_ELECTRICO.md).
 - **Mis carros**, **revisión de carro usado**, **reportes**, **respaldo**, **modo tablero**, **unidades** y **simulador** (carro moderno CAN con MAF o Honda 2000 ISO 9141-2 con MAP; 12 fallas del carro y 4 del adaptador; siempre marcado como simulador).
 
 ## Cómo usarla
@@ -82,6 +96,7 @@ Si algo falla: **Escanear → Diagnóstico de conexión → Descargar .json**. D
 - El servidor exige el código familiar, bloquea una dirección tras 6 códigos equivocados en 15 minutos, solo acepta tu sitio (CORS), limita consultas por minuto y por día, valida modelo, tamaño, herramientas y cantidad de fotos, y no devuelve la clave en ningún error.
 - El **VIN no se envía** a la IA ni a la NHTSA salvo que lo permitás en *Ajustes → Privacidad*. El apodo del carro nunca se envía. El registro técnico y el diagnóstico de conexión tapan el VIN.
 - La IA recibe los sensores que el carro reporta y los que no; ScanIA revisa su respuesta y avisa si cita códigos o lecturas que no existen.
+- El módulo eléctrico nunca recomienda un fusible de más amperaje ni medir resistencia con el circuito energizado, y excluye los circuitos de bolsas de aire.
 - La app no manda comandos que accionen componentes ni toquen sistemas de seguridad. El único comando que cambia algo es borrar códigos (modo 04), con confirmación y escaneo guardado antes.
 
 ## Desarrollo
@@ -94,7 +109,7 @@ index.html …      app construida (la publica GitHub Pages)
 dist/ScanIA.html  app en un solo archivo, para usar sin internet
 ```
 ```bash
-npm test            # 73 pruebas: parser ELM327, protocolos, fallas del adaptador, diagnóstico, IA, servidor, regresiones A-xx
+npm test            # 92 pruebas: parser ELM327, protocolos, fallas del adaptador, diagnóstico, eléctrico, IA, servidor, regresiones
 npm run build       # arma index.html, sw.js, manifest, íconos y dist/ScanIA.html (requiere Python 3 + Pillow)
 npm run e2e         # prueba la interfaz en Chrome sin pantalla con el simulador (requiere Playwright)
 python3 tests/e2e_ia.py   # pantalla de IA con un servidor falso
@@ -107,5 +122,7 @@ Publicar: en GitHub, **Settings → Pages → Deploy from a branch → `main` / 
 - [Compatibilidad real](docs/COMPATIBILIDAD_REAL.md)
 - [Honda CR-V 2000 B20Z](docs/HONDA_CRV_2000_B20Z.md)
 - [Plan de pruebas físicas](docs/PRUEBAS_FISICAS.md)
+- [Diagnóstico eléctrico](docs/DIAGNOSTICO_ELECTRICO.md)
+- [Compatibilidad eléctrica por vehículo](docs/COMPATIBILIDAD_ELECTRICA_VEHICULOS.md)
 
 ScanIA orienta el diagnóstico; no reemplaza la revisión física de un mecánico. Nunca uses el teléfono mientras manejás.
