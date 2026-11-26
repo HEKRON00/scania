@@ -842,6 +842,8 @@
     reglaLectura(lectura, out);
     reglaPocosDatos(r, out);
     reglaSintomas(extra.sintomas, out, r);
+    // Reglas de otros módulos (por ejemplo, la causa común eléctrica). Una regla extra nunca rompe el análisis.
+    for (const regla of S.REGLAS_EXTRA || []) { try { regla({ resumen: r, codigos: cod, lectura, extra, H, certeza }, out); } catch (e) { /* se ignora */ } }
     const problemas = out.filter((h) => ["alta", "media", "baja"].includes(h.gravedad));
     const s06 = out.find((h) => h.id === "misfire_cero");
     if (s06 && problemas.length) out.splice(out.indexOf(s06), 1);

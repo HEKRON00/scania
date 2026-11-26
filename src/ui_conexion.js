@@ -412,7 +412,9 @@
     const dis = h.distinguir ? `<div class="bloque"><b>Lo que los datos no pueden separar</b>${U.t(h.distinguir)}</div>` : "";
     const cond = h.condiciones ? `<div class="bloque"><b>Condiciones de la medición</b>${U.t(h.condiciones)}</div>` : "";
     const ref = h.referencia ? `<div class="bloque"><b>Valores de referencia</b>${U.t(h.referencia)}</div>` : "";
-    const detalle = cond + ref + causas + alt + dis + prueba + esp + nc;
+    const ELECTRICOS = /^(causa_comun_electrica|alternador|bateria_baja|sobrevoltaje|ect_imposible|ect_intermitente|dato_imposible_|maf_sin_senal|inyector_circuito|bobina_circuito)/;
+    const irEl = ELECTRICOS.test(h.id || "") ? `<div class="acciones"><a class="btn" href="#electrico">Revisar en Sistema eléctrico</a></div>` : "";
+    const detalle = cond + ref + causas + alt + dis + prueba + esp + nc + irEl;
     return `<div class="hallazgo ${esc(h.gravedad)}">
       <div class="titulo"><span>${U.t(h.titulo)}</span><span class="chips">
         ${h.certeza ? `<span class="chip ${esc(h.certeza)}" title="Qué tan seguro es que la condición existe (no la causa)">${esc(S.CERTEZAS[h.certeza])}</span>` : ""}
@@ -587,7 +589,7 @@
   U.on("init", async () => {
     const sel = $("#sel-escenario"), selP = $("#sel-perfil-sim");
     selP.innerHTML = Object.entries(S.PERFILES_SIM).map(([id, p]) => `<option value="${esc(id)}">${esc(p.nombre)}</option>`).join("");
-    const grupos = { vehiculo: "Fallas del carro", protocolo: "Fallas del adaptador" };
+    const grupos = { vehiculo: "Fallas del carro", electrico: "Fallas eléctricas", protocolo: "Fallas del adaptador" };
     const llenarEscenarios = () => {
       const noAplica = S.PERFILES_SIM[selP.value].noAplica || [];
       const previo = sel.value;

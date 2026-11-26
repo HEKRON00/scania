@@ -44,8 +44,9 @@
   }
 
   // ================================================================== respaldo
-  function exportar() {
+  async function exportar() {
     const d = S.almacen.exportar($("#resp-codigo").checked);
+    if ($("#resp-archivos") && $("#resp-archivos").checked) { try { d.archivos = await S.archivos.todos(); } catch (e) { d.archivos = []; } }
     U.descargar(`scania-respaldo-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(d, null, 2));
     U.mensaje($("#msg-respaldo"), `Respaldo descargado: ${d.carros.length} carro(s), ${d.escaneos.length} escaneo(s), ${d.historial.length} diagnóstico(s).`, "ok");
   }
@@ -57,6 +58,7 @@
       U.confirmar("¿Restaurar este respaldo?", "Se juntan los carros, escaneos y diagnósticos del archivo con los que ya tenés. No se borra nada.", "Restaurar", () => {
         try {
           const r = S.almacen.importar(d);
+          for (const a of d.archivos || []) if (a && a.id && a.datos) S.archivos.guardar(a);
           E.ajustes = S.almacen.ajustes();
           U.mensaje($("#msg-respaldo"), `Restaurado: ${r.carros} carro(s), ${r.escaneos} escaneo(s), ${r.diagnosticos} diagnóstico(s), ${r.pruebas} prueba(s).`, "ok");
           U.emit("carro"); U.emit("escaneo"); U.emit("ajustes");

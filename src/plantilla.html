@@ -30,6 +30,7 @@
   <button data-vista="escanear"><span class="ic">⌁</span><span>Escanear</span></button>
   <button data-vista="vivo"><span class="ic">〰</span><span>En vivo</span></button>
   <button data-vista="pruebas"><span class="ic">✓</span><span>Pruebas</span></button>
+  <button data-vista="electrico"><span class="ic">ϟ</span><span>Eléctrico</span></button>
   <button data-vista="ia"><span class="ic">✦</span><span>IA</span></button>
   <button data-vista="carros"><span class="ic">▣</span><span>Carros</span></button>
   <button data-vista="mas"><span class="ic">⋯</span><span>Más</span></button>
@@ -160,6 +161,34 @@
   </div>
 </section>
 
+<!-- ================= SISTEMA ELÉCTRICO ================= -->
+<section class="vista" data-vista="electrico">
+  <div class="rejilla">
+    <div class="tarjeta col-12">
+      <h2>Sistema eléctrico y electrónico</h2>
+      <div id="el-carro"></div>
+      <div class="el-tabs" role="tablist">
+        <button class="el-tab activa" data-elp="resumen">Resumen</button>
+        <button class="el-tab" data-elp="fusibles">Fusibles y relés</button>
+        <button class="el-tab" data-elp="mediciones">Mediciones</button>
+        <button class="el-tab" data-elp="carga">Batería y carga</button>
+        <button class="el-tab" data-elp="sensores">Sensores y actuadores</button>
+        <button class="el-tab" data-elp="diagramas">Diagramas</button>
+        <button class="el-tab" data-elp="fotos">Fotos</button>
+        <button class="el-tab" data-elp="informe">Informe</button>
+      </div>
+    </div>
+    <div class="tarjeta col-12 el-panel" data-elpanel="resumen" id="el-resumen"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="fusibles" id="el-fusibles"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="mediciones" id="el-mediciones"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="carga" id="el-carga"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="sensores" id="el-sensores"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="diagramas" id="el-diagramas"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="fotos" id="el-fotos"></div>
+    <div class="tarjeta col-12 el-panel oculto" data-elpanel="informe" id="el-informe"></div>
+  </div>
+</section>
+
 <!-- ================= IA ================= -->
 <section class="vista" data-vista="ia">
   <div class="rejilla">
@@ -221,6 +250,7 @@
       <h2>Respaldo</h2>
       <p class="nota">Todo (carros, mantenimiento, escaneos y diagnósticos) se guarda solo en este dispositivo. Hacé un respaldo de vez en cuando.</p>
       <label class="check"><input type="checkbox" id="resp-codigo"> Incluir el código familiar del servidor de IA</label>
+      <label class="check"><input type="checkbox" id="resp-archivos" checked> Incluir fotos y diagramas del sistema eléctrico (el archivo pesa más)</label>
       <div class="acciones">
         <button class="btn primario" id="btn-exportar">Descargar respaldo (JSON)</button>
         <label class="btn">Restaurar respaldo<input type="file" id="importar" accept="application/json,.json" hidden></label>

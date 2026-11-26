@@ -159,13 +159,26 @@
     },
     borrarPrueba(id) { escribir("scania-pruebas", leer("scania-pruebas", []).filter((p) => p.id !== id)); },
 
+    // ------------------------------------------------------------ sistema eléctrico (inspección, mediciones, diagramas y fotos por carro)
+    electrico(carroId) {
+      const todo = leer("scania-electrico", {});
+      const clave = carroId == null ? "sin_carro" : String(carroId);
+      return { variante: null, fusibles: {}, reles: {}, mediciones: [], componentes: {}, diagramas: [], fotos: [], sintomas: [], ...(todo[clave] || {}) };
+    },
+    guardarElectrico(carroId, cambios) {
+      const todo = leer("scania-electrico", {});
+      const clave = carroId == null ? "sin_carro" : String(carroId);
+      todo[clave] = { ...this.electrico(carroId), ...cambios, actualizado: Date.now() / 1000 };
+      return escribir("scania-electrico", todo);
+    },
+
     // ------------------------------------------------------------ respaldo
     exportar(incluirCodigo) {
       const a = this.ajustes();
       delete a._claveVieja;
       if (!incluirCodigo) delete a.codigo;
       return { app: "ScanIA", version: 2, fecha: new Date().toISOString(), ajustes: a, carros: this.carros(),
-        carroActivo: this.carroActivoId(), historial: this.historial(), escaneos: this.escaneos(), pruebas: this.pruebas() };
+        carroActivo: this.carroActivoId(), historial: this.historial(), escaneos: this.escaneos(), pruebas: this.pruebas(), electrico: leer("scania-electrico", {}) };
     },
     importar(d) {
       if (!d || d.app !== "ScanIA") throw new Error("Ese archivo no es un respaldo de ScanIA.");
@@ -187,12 +200,75 @@
       for (const p of d.pruebas || []) if (!pru.some((x) => x.fecha === p.fecha)) pru.push({ ...ref(p), id: nuevoId(pru) });
       pru.sort((a, b) => b.fecha - a.fecha);
       escribir("scania-pruebas", pru.slice(0, 200));
+      // Sistema eléctrico: por carro (con el id ya reasignado). Si el carro ya tenía datos, se juntan sin borrar.
+      if (d.electrico && typeof d.electrico === "object") {
+        const el = leer("scania-electrico", {});
+        for (const [k, v] of Object.entries(d.electrico)) {
+          const nuevo = k === "sin_carro" ? k : String(mapa[k] != null ? mapa[k] : k);
+          const prev = el[nuevo] || {};
+          el[nuevo] = { ...v, ...prev, fusibles: { ...(v.fusibles || {}), ...(prev.fusibles || {}) }, reles: { ...(v.reles || {}), ...(prev.reles || {}) },
+            mediciones: [...(prev.mediciones || []), ...(v.mediciones || []).filter((m) => !(prev.mediciones || []).some((x) => x.fecha === m.fecha && x.prueba === m.prueba))],
+            diagramas: [...(prev.diagramas || []), ...(v.diagramas || []).filter((m) => !(prev.diagramas || []).some((x) => x.id === m.id))],
+            fotos: [...(prev.fotos || []), ...(v.fotos || []).filter((m) => !(prev.fotos || []).some((x) => x.id === m.id))] };
+        }
+        escribir("scania-electrico", el);
+      }
       escribir("scania-escaneos", esc.slice(0, 120));
       hist.sort((a, b) => b.fecha - a.fecha);
       escribir("scania-carros", carros);
       escribir("scania-historial", hist.slice(0, MAX_HISTORIAL));
       if (d.ajustes) { const { clave, ...resto } = d.ajustes; this.guardarAjustes({ ...this.ajustes(), ...resto, codigo: resto.codigo || this.ajustes().codigo }); }
       return { carros: (d.carros || []).length, diagnosticos: (d.historial || []).length, escaneos: (d.escaneos || []).length, pruebas: (d.pruebas || []).length };
+    },
+  };
+
+  /**
+   * Archivos grandes (fotos y diagramas) en IndexedDB, para no llenar localStorage.
+   * Si IndexedDB no está disponible (pruebas en Node, navegador bloqueado), quedan en memoria y se avisa.
+   */
+  const memArchivos = new Map();
+  let dbPromesa = null;
+  function db() {
+    if (dbPromesa) return dbPromesa;
+    dbPromesa = new Promise((res) => {
+      try {
+        if (!raiz.indexedDB) return res(null);
+        const r = raiz.indexedDB.open("scania-archivos", 1);
+        r.onupgradeneeded = () => r.result.createObjectStore("archivos", { keyPath: "id" });
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => res(null);
+      } catch (e) { res(null); }
+    });
+    return dbPromesa;
+  }
+  const tx = async (modo, fn) => {
+    const d = await db();
+    if (!d) return null;
+    return new Promise((res, rej) => {
+      const t = d.transaction("archivos", modo), st = t.objectStore("archivos");
+      const r = fn(st);
+      t.oncomplete = () => res(r && "result" in r ? r.result : true);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  S.archivos = {
+    persistente: null,
+    /** Guarda { id?, carroId, tipo: "foto"|"diagrama", mime, datos (base64) } y devuelve el id. */
+    async guardar(a) {
+      const item = { ...a, id: a.id || `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, fecha: a.fecha || Date.now() / 1000 };
+      try { const ok = await tx("readwrite", (st) => st.put(item)); this.persistente = ok != null; if (ok == null) memArchivos.set(item.id, item); }
+      catch (e) { memArchivos.set(item.id, item); this.persistente = false; }
+      return item.id;
+    },
+    async obtener(id) {
+      if (memArchivos.has(id)) return memArchivos.get(id);
+      try { return (await tx("readonly", (st) => st.get(id))) || null; } catch (e) { return null; }
+    },
+    async borrar(id) { memArchivos.delete(id); try { await tx("readwrite", (st) => st.delete(id)); } catch (e) { /* nada */ } },
+    async todos() {
+      let lista = [];
+      try { lista = (await tx("readonly", (st) => st.getAll())) || []; } catch (e) { lista = []; }
+      return lista.concat([...memArchivos.values()].filter((m) => !lista.some((x) => x.id === m.id)));
     },
   };
 

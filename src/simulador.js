@@ -45,6 +45,16 @@
       ff: ff("P0171", { rpm: 2410, velocidad: 62, temp_motor: 90, carga: 38, stft1: 13.3, ltft1: 4.7, map: 50, maf: 14.1, acelerador: 22, temp_admision: 34 }) },
     datos_contradictorios: { nombre: "Sensor de temperatura desconectado", descripcion: "El sensor del refrigerante marca −40 °C con el motor caliente: un dato imposible.", alm: ["P0118"], pen: [],
       ff: ff("P0118", { rpm: 1020, velocidad: 0, temp_motor: -40, carga: 25, stft1: 0.8, ltft1: 2.3, map: 34, maf: 3.6, acelerador: 14, temp_admision: 35 }) },
+    // ---- fallas eléctricas que se ven por OBD (las que solo se ven con multímetro están en los casos del módulo eléctrico)
+    bateria_baja: { nombre: "Eléctrico: batería baja", descripcion: "Con el motor apagado la batería marca poco y al dar arranque cae mucho; con el motor encendido carga normal.", grupo: "electrico", alm: [], pen: [], ff: null },
+    tierra_deficiente: { nombre: "Eléctrico: tierra de sensores deficiente", descripcion: "Voltaje inestable y dos sensores con señal alta a la vez: apunta a una tierra común, no a dos sensores malos.", grupo: "electrico", alm: [], pen: ["P0113", "P0118"], ff: null },
+    sensor_sin_alimentacion: { nombre: "Eléctrico: sensores sin referencia de 5 V", descripcion: "El MAP y el TPS marcan cero a la vez: falta la referencia que comparten.", grupo: "electrico", alm: ["P0107", "P0122"], pen: [],
+      ff: ff("P0107", { rpm: 820, velocidad: 0, temp_motor: 88, carga: 0, stft1: 0, ltft1: 2.3, map: 0, acelerador: 0, temp_admision: 35 }) },
+    cortocircuito: { nombre: "Eléctrico: sensor de temperatura en corto", descripcion: "La señal del sensor de temperatura del motor está en corto a tierra: marca el máximo con el motor tibio.", grupo: "electrico", alm: ["P0117"], pen: [],
+      ff: ff("P0117", { rpm: 790, velocidad: 0, temp_motor: 215, carga: 23, stft1: 0.8, ltft1: 2.3, map: 33, acelerador: 14, temp_admision: 35 }) },
+    cable_interrumpido: { nombre: "Eléctrico: cable del sensor de temperatura cortado", descripcion: "Circuito abierto: el sensor marca −40 °C con el motor caliente.", grupo: "electrico", alm: ["P0118"], pen: [],
+      ff: ff("P0118", { rpm: 1010, velocidad: 0, temp_motor: -40, carga: 25, stft1: 0.8, ltft1: 2.3, map: 34, acelerador: 14, temp_admision: 35 }) },
+    conector_defectuoso: { nombre: "Eléctrico: conector con falso contacto", descripcion: "La temperatura del motor salta a −40 °C de vez en cuando: típico de un conector sulfatado o flojo.", grupo: "electrico", alm: [], pen: ["P0118"], ff: null },
     // ---- fallas del adaptador / protocolo (usan el carro sano o con misfire)
     respuestas_incompletas: { nombre: "Adaptador: respuestas incompletas", descripcion: "El adaptador a veces corta las respuestas. La app debe descartarlas sin inventar datos.", grupo: "protocolo", base: "misfire_cil2", falla: "incompletas" },
     timeout: { nombre: "Adaptador: respuestas tardías", descripcion: "El adaptador a veces contesta tarde. La app debe resincronizarse sin mezclar respuestas.", grupo: "protocolo", base: "normal", falla: "tardias" },
@@ -144,12 +154,15 @@
       if (this.motorApagado || (this.arranqueEn != null && t - this.arranqueEn < 2.5)) {
         // Llave en ON con motor apagado, o dando arranque
         const dando = this.arranqueEn != null && t - this.arranqueEn < 2.5 && t - this.arranqueEn > 0.4;
-        const v = dando ? 10.3 + r.gauss(0, 0.15) : 12.55 + r.gauss(0, 0.02);
+        const v = esc === "bateria_baja" ? (dando ? 8.9 + r.gauss(0, 0.15) : 11.95 + r.gauss(0, 0.02)) : dando ? 10.3 + r.gauss(0, 0.15) : 12.55 + r.gauss(0, 0.02);
         const sop = new Set(this.p.pids);
         const apagado = { t: this.reloj(), rpm: dando ? 220 + r.gauss(0, 20) : 0, velocidad: 0, temp_motor: 88, temp_admision: 34, carga: 0, acelerador: 14,
           sistema_comb: 0, stft1: 0, ltft1: 2.3, maf: dando ? 1.2 : 0, map: dando ? 80 : 97, o2_b1s1: 0.45, o2_b1s2: 0.45, avance: 0,
           voltaje: Math.round(v * 1000) / 1000, temp_aceite: 92, temp_ambiente: 30, baro: 97, consumo: 0, combustible: Math.round(this.combustible),
           tiempo_motor: 0 };
+        if (esc === "sensor_sin_alimentacion") { apagado.map = 0; apagado.acelerador = 0; }
+        if (esc === "cortocircuito") apagado.temp_motor = 215;
+        if (esc === "cable_interrumpido" || esc === "datos_contradictorios") apagado.temp_motor = -40;
         for (const k of Object.keys(apagado)) if (k !== "t" && k !== "voltaje" && !sop.has(k)) delete apagado[k];
         return apagado;
       }
@@ -203,9 +216,13 @@
       if (esc === "catalizador") o2d = 0.45 + 0.33 * Math.sin((2 * Math.PI * t) / 1.7 + r.uniforme(-1.5, 1.5));
       else if (esc === "sensor_o2") o2a = 0.47 + 0.07 * Math.sin((2 * Math.PI * t) / 11) + r.gauss(0, 0.01);
       else if (esc === "mezcla_rica") o2a = 0.62 + 0.28 * Math.sin((2 * Math.PI * t) / 1.9 + r.uniforme(-1.2, 1.2));
-      if (esc === "datos_contradictorios") temp = -40;
+      if (esc === "datos_contradictorios" || esc === "cable_interrumpido") temp = -40;
+      if (esc === "cortocircuito") temp = 215;
+      if (esc === "conector_defectuoso" && t % 17 < 1.2) temp = -40;
+      if (esc === "sensor_sin_alimentacion") { map = 0; acelerador = 0; }
 
       let voltaje = voltBase + r.gauss(0, esc === "alternador" ? 0.04 : 0.05);
+      if (esc === "tierra_deficiente") voltaje = 13.2 + 0.45 * Math.sin(t / 3) + r.gauss(0, 0.15);
       if (this.cargas) voltaje -= esc === "alternador" ? 0.45 : 0.2;
       this.combustible = Math.max(5, this.combustible - 0.001);
 
@@ -213,8 +230,8 @@
       const d = { rpm, velocidad, temp_motor: temp, temp_admision: tempAdm, carga, acelerador,
         stft1: stft, ltft1: ltft, maf, map, o2_b1s1: lim(o2a), o2_b1s2: lim(o2d), avance, voltaje,
         combustible: this.combustible, tiempo_motor: 600 + t,
-        sistema_comb: nombreFase === "frenando" ? 4 : esc === "datos_contradictorios" || temp >= 40 ? 2 : 1,
-        temp_aceite: (esc === "datos_contradictorios" ? 96 : temp + 6) + r.gauss(0, 0.3), temp_ambiente: 30, baro: 97, consumo: (maf / 14.7) * 3600 / 740 };
+        sistema_comb: nombreFase === "frenando" ? 4 : ["datos_contradictorios", "cable_interrumpido", "cortocircuito"].includes(esc) || temp >= 40 ? 2 : 1,
+        temp_aceite: (["datos_contradictorios", "cable_interrumpido", "cortocircuito", "conector_defectuoso"].includes(esc) ? 96 : temp + 6) + r.gauss(0, 0.3), temp_ambiente: 30, baro: 97, consumo: (maf / 14.7) * 3600 / 740 };
       const out = { t: this.reloj() };
       const sop = new Set(this.p.pids);
       for (const k in d) if (sop.has(k) || k === "voltaje") out[k] = Math.round(d[k] * 1000) / 1000;

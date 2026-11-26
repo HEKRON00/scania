@@ -117,7 +117,8 @@
   U.analizarAhora = () => {
     const f = U.estado.fuente, p = U.perfil();
     return S.analizar(U.estado.historial, U.estado.lectura, { pruebas06: U.estado.pruebas06, cilindrada: U.cilindrada(), sintomas: U.estado.sintomas,
-      perfil: p ? { encendido: p.encendido } : null, fuenteVoltaje: f ? (f.usaATRV ? "medido por el adaptador (ATRV)" : "PID 42") : null });
+      perfil: p ? { encendido: p.encendido } : null, fuenteVoltaje: f ? (f.usaATRV ? "medido por el adaptador (ATRV)" : "PID 42") : null,
+      conexion: f && f.stats ? { reinicios: f.stats.reinicios || 0, perdidas: (f.stats.errores && f.stats.errores.sin_carro) || 0 } : null });
   };
   /** Carro con kilometraje: el tablero puede estar en millas (carros importados de EE. UU.). Internamente siempre se guarda en km. */
   U.kmTexto = function (c) {
@@ -127,7 +128,7 @@
   };
 
   // ------------------------------------------------------------------ navegación
-  const VISTAS = ["inicio", "escanear", "vivo", "pruebas", "ia", "carros", "mas"];
+  const VISTAS = ["inicio", "escanear", "vivo", "pruebas", "electrico", "ia", "carros", "mas"];
   U.ir = function (vista) {
     if (!VISTAS.includes(vista)) vista = "inicio";
     U.$$(".vista").forEach((v) => v.classList.toggle("activa", v.dataset.vista === vista));
