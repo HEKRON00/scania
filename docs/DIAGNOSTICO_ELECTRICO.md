@@ -1,6 +1,8 @@
-# Diagnóstico eléctrico y electrónico (ScanIA 3.0)
+# Diagnóstico eléctrico y electrónico (ScanIA 3.1)
 
 > **Estado:** implementado y con pruebas automáticas (casos simulados, interfaz en Chrome de escritorio y celular, IA con un servidor falso). **Ninguna función eléctrica se probó todavía en un carro real con un multímetro.** El plan está en [PRUEBAS_FISICAS.md](PRUEBAS_FISICAS.md), sección 5.
+>
+> **3.1:** corrige los hallazgos de la [auditoría independiente](AUDITORIA_INDEPENDIENTE_3_0.md). El detalle por hallazgo está en [REGISTRO_DE_CAMBIOS_3_1.md](REGISTRO_DE_CAMBIOS_3_1.md). La sección 2a resume qué cambió en la forma de razonar.
 
 ## 1. Auditoría previa (qué había y qué se reutilizó)
 
@@ -29,6 +31,32 @@
 | **Fotos** | Fotos de cajas, etiquetas, fusibles, relés, conectores y cables. Con el servidor de IA: lectura separada en "confirmada", "probable", "imagen insuficiente" y "requiere inspección física". |
 | **Informe** | Estado general, fusibles revisados/pendientes/incorrectos, relés, mediciones, componentes, diagramas, fallas confirmadas, sospechas, pruebas y fuentes. PDF (imprimir) y JSON. |
 
+## 2a. Qué sabe, qué mide, qué infiere y qué te pide comprobar (3.1)
+
+Cada conclusión lleva uno de estos seis niveles, en el diagnóstico, en cada fusible, en cada medición y en el informe:
+
+| Nivel | Cuándo se usa |
+|---|---|
+| **Confirmado** | Medido o comprobado físicamente (multímetro, probador, intercambio de relé), sin contradicciones. |
+| **Probable** | Hay evidencia, pero falta una condición: revisado solo a ojo, leído en una foto, corto a tierra sin confirmar que todas las cargas estaban desconectadas, guía de taller en lugar del valor del fabricante. |
+| **Sospechoso** | Hipótesis por síntomas, códigos o inspección (por ejemplo, relé principal PGM-FI o un circuito agregado). Nunca es una conclusión. |
+| **No verificable** | Medición imposible (14.2 V "en reposo", resistencia negativa, más de 20 V) o datos que se contradicen. No se usa para concluir: hay que repetirla. |
+| **Requiere medición física** | Falta una medición o una inspección que solo vos podés hacer. |
+| **Requiere documentación técnica** | Falta el dato del manual (resistencia, terminales, cableado, valores). ScanIA no lo inventa. |
+
+Otros cambios de 3.1 en la forma de razonar:
+
+- **Mediciones validadas.** Antes de interpretar, se revisa que el valor sea físicamente posible y coherente con la condición elegida. Una medición inválida no se guarda.
+- **Contradicciones.** Si un fusible está anotado "bien" y una medición del mismo fusible dice "abierto", ninguna de las dos se usa: queda como no verificable hasta repetirla.
+- **Corto a tierra.** Solo se confirma si marcaste que desconectaste **todas** las cargas de ese fusible (según el diagrama).
+- **Sensores.** El componente no se da por malo sin revisar el conector; la computadora no se sospecha sin conector bien y sin descartar el corto.
+- **Hipótesis por síntomas:** relé principal, alimentación general, cortos, sobrecalentamiento ("olor a quemado" → detener), falso contacto e instalaciones agregadas.
+- **Variante sin confirmar.** La ficha del CR-V se muestra como "variante sin confirmar" hasta que compares la etiqueta de tu tapa y lo marques.
+- **Disposición física.** Las cajas interior y del motor se dibujan como en las fotos de las tapas (S10-A0 y S10-E0), con el aviso de que no se sabe si esas fotos son de tu carro. "Ver como lista" muestra el orden por número.
+- **Relés.** Para cada relé se dice qué falta para diagnosticarlo con multímetro. Podés anotar terminales, bobina, alimentación, control y diodo desde tu manual (con fuente).
+- **Circuitos.** "Diagramas" es un **visor de archivos**: ScanIA no lee tus diagramas. Lo único que entiende del cableado son los **circuitos documentados** que cargues tramo por tramo (batería → fusible → relé → conector → componente → tierra, con terminal y color), siempre con fuente. La ficha del CR-V no trae ninguno.
+- **Diagramas de otro carro.** Si el año, el motor o el mercado de un diagrama no coinciden con tu carro, se avisa en la lista y en la búsqueda.
+
 ## 3. Reglas que el código hace cumplir (y sus pruebas)
 
 | Regla | Dónde | Prueba automática |
@@ -44,6 +72,11 @@
 | El voltaje OBD solo nunca da una conclusión; lo confirmado son los hechos medidos | `S.evaluarSistemaCarga` | "batería y carga…" |
 | Varios códigos de circuito no se tratan como averías separadas: se buscan causas comunes con su evidencia | `reglaCausaComun` (en el análisis) | "causa común…" |
 | Diagramas: ninguno inventado; los del dueño exigen fuente | `fichas.js` (`diagramas: []`), interfaz | "ficha…", `e2e.py` |
+| Mediciones imposibles o contradictorias: "No verificable", no se guardan | `S.validarMedicion`, `S.evaluarMedicion` | `auditoria_3_0.test.js` C-01, `e2e.py` |
+| Corto a tierra confirmado solo con todas las cargas desconectadas | `S.evaluarMedicion` (`cargas_desconectadas`) | C-02, `e2e.py` |
+| Inspección y medición contradictorias: no se concluye | `S.contradiccionesFusibles` | C-03 |
+| Amperaje leído en una foto: nunca cuenta como observado | `S.evaluarFusible` (`amperaje_foto`) | A-07, `e2e_ia.py` |
+| Circuitos y datos de relés solo con fuente | `S.validarCircuito`, interfaz de relés | A-05, A-10, `e2e.py` |
 
 ## 4. Casos simulados (los 12 pedidos)
 
@@ -80,17 +113,21 @@ Además, el simulador OBD tiene 6 fallas eléctricas (batería baja, tierra de s
 |---|---|---|
 | [Honda — 2000 CR-V Online Reference Owner's Manual](https://techinfo.honda.com/rjanisis/pubs/om/CR0000/CR0000MAINIDX.pdf) | Fabricante | Existencia del manual oficial (las páginas de fusibles no se pudieron abrir directamente) |
 | [2000 CR-V Owner's Manual, pág. 267 (manualowl)](https://www.manualowl.com/am/Honda/2000-CR-V/Manual/6985?page=267) | Reproducción del manual | Ubicación de las tres cajas |
-| [fuse-box.info](https://fuse-box.info/?p=12669), [fuseboxinfo.com](https://fuseboxinfo.com/index.php/cars/29-honda/1634-honda-cr-v-2000-fuses), [autogenius.info](https://www.autogenius.info/honda-cr-v-2000-2001-fuse-box-diagram) | Secundarias | Tablas de fusibles 2000–2001 (coinciden en la interior; difieren en las posiciones 4 y 5 del motor) |
+| [fuse-box.info](https://fuse-box.info/?p=12669), [fuseboxinfo.com](https://fuseboxinfo.com/index.php/cars/29-honda/1634-honda-cr-v-2000-fuses), [autogenius.info](https://www.autogenius.info/honda-cr-v-2000-2001-fuse-box-diagram) | Secundarias | Tablas de fusibles 2000–2001 (coinciden en la interior; una de las tres difiere en las posiciones 4 y 5 del motor, y la foto de la tapa coincide con las otras dos) |
 | [startmycar.com](https://www.startmycar.com/us/honda/cr-v/info/fusebox/2000) | Secundaria | Nombres de relés bajo el capó (numeración propia) |
 | [fuseandrelay.com](https://fuseandrelay.com/?p=15260) | Secundaria, mercado no identificado | Muestra una distribución distinta: prueba de que hay variantes |
+| [go-parts.com](https://www.go-parts.com/) (publicación sobre el relé del A/C del CR-V) | Secundaria (vendedor de repuestos) | Única fuente de que el relé del embrague del A/C falla con frecuencia; se cita como tal |
+| itstillruns.com (relé principal del CR-V) | Secundaria, una sola publicación | Ubicación del relé principal PGM-FI: **no confirmada** |
+| Fotos de dos tapas: interior `S10-A0` y del motor `S10-E0` (aportadas por el usuario el 26/11/2026) | Etiqueta en foto, **origen sin confirmar** | Disposición física de las cajas, antiniebla en la posición 1 (20 A), 10 A en la posición 20, techo corredizo. No se subieron al repositorio. |
 
 No se encontró ni se usó el manual de servicio de Honda (diagramas eléctricos, valores de resistencia, ubicación de conectores).
 
 ## 7. Limitaciones
 
-- La ficha del CR-V es de fuentes secundarias para EE. UU./Canadá y no está comparada con la etiqueta de la tapa de tu carro.
-- La representación de la caja es orientativa (ordenada por número), no la disposición real.
-- Los relés no tienen posición documentada; el relé principal PGM-FI no tiene ubicación confirmada.
+- La ficha del CR-V es de fuentes secundarias para EE. UU./Canadá y de dos fotos de tapas cuyo origen no está confirmado. No está comparada con la etiqueta de la tapa de TU carro hasta que lo marques.
+- La disposición física de las cajas sale de esas fotos. Sin confirmar que sean de tu carro, es una referencia, no una certeza.
+- Los relés bajo el capó tienen posición según la foto; los demás (incluido el relé principal PGM-FI) no tienen ubicación confirmada. Ningún relé tiene terminales ni resistencia de bobina documentados.
+- ScanIA no conoce el cableado: no hay circuitos, colores, terminales ni pines de la computadora del CR-V hasta que los cargues desde el manual de servicio.
 - No hay valores de resistencia, voltajes de referencia ni consumos del fabricante: se anotan desde tu manual.
 - Las fotos y diagramas viven en el navegador del teléfono o de la compu (IndexedDB). Si el navegador no lo permite, la app avisa; el respaldo los incluye si marcás la casilla.
 - La lectura de fotos necesita el servidor de IA (de pago por uso en Anthropic).

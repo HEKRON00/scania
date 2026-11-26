@@ -88,14 +88,14 @@ Opcionales (con resultados del taller): **Compresión** y **Presión de combusti
 | BC-02 | Escaneo guardado antes | Confirmar el borrado | Aparece un escaneo "antes de borrar" en el historial | | No probada |
 | BC-03 | Respuesta del carro | Con el motor **apagado** y llave en ON | Si el carro rechaza (por ejemplo, con el motor encendido), ScanIA dice el motivo | | No probada |
 
-## 5. Sistema eléctrico (ScanIA 3.0)
+## 5. Sistema eléctrico (ScanIA 3.0 / 3.1)
 
 Necesitás un multímetro digital barato. Seguí siempre las reglas de seguridad de la pestaña **Eléctrico → Resumen** (resistencia y continuidad solo sin energía; nada en circuitos de bolsas de aire).
 
 | ID | Prueba | Cómo | Qué debe pasar | Resultado | Estado |
 |---|---|---|---|---|---|
-| EL-01 | Etiqueta de la caja interior | Foto de la etiqueta de la tapa; comparala con la pestaña "Fusibles y relés" | Anotar cuáles posiciones coinciden y cuáles no. Marcar "confirmado con la tapa" las que coincidan | | No probada |
-| EL-02 | Etiqueta de la caja del motor | Igual; fijate en las posiciones 4 y 5 (las fuentes no coinciden) | Anotar qué dicen 4 y 5 en tu tapa | | No probada |
+| EL-01 | Etiqueta de la caja interior | Foto de la etiqueta de la tapa de TU carro; comparala con la pestaña "Fusibles y relés" (la disposición de la app sale de una foto `S10-A0` de origen sin confirmar) | Decir si tu tapa es la misma (`S10-A0`) y qué dice en la posición 20 (¿7.5 A o 10 A?) y en la 1 (antiniebla). Si todo coincide, tocar "Comparé la etiqueta de MI tapa y coincide" | | No probada |
+| EL-02 | Etiqueta de la caja del motor | Igual (la app usa una foto `S10-E0`) | Decir si tu tapa es la misma y si los 4 relés están donde los dibuja la app | | No probada |
 | EL-03 | ¿Tiene caja de ABS? | Buscala en el compartimiento del motor, lado del pasajero | Anotar sí/no | | No probada |
 | EL-04 | Fusible con voltaje en ambos lados | Llave en ON, multímetro en voltios; un fusible que funcione (por ejemplo, el del radio) | ScanIA debe decir "bien" | | No probada |
 | EL-05 | Fusible con continuidad | Sacá un fusible de repuesto y medilo | ScanIA debe decir "continuidad: bien" | | No probada |
@@ -104,7 +104,9 @@ Necesitás un multímetro digital barato. Seguí siempre las reglas de seguridad
 | EL-08 | Caída de voltaje en la tierra al arrancar | Ayudante da arranque; manos lejos de piezas que giran | Anotar el valor | | No probada |
 | EL-09 | Fotos con IA (si tenés el servidor) | Foto de la caja interior sin tapa | La IA separa confirmado / probable / insuficiente / físico y no da por quemado un fusible solo por la foto | | No probada |
 | EL-10 | Informe eléctrico | Pestaña Informe → Generar → Descargar JSON y PDF | Se descargan los dos | | No probada |
-| EL-11 | Respaldo con fotos | Más → Respaldo con la casilla de fotos marcada; restaurarlo en otro navegador | Vuelven las fotos y diagramas | | No probada |
+| EL-11 | Respaldo con fotos | Más → Respaldo con la casilla de fotos marcada; restaurarlo en otro navegador | Vuelven las fotos y diagramas, y el mensaje dice cuántos archivos se restauraron | | No probada |
+| EL-12 | Medición imposible (3.1) | Anotá a propósito 14.2 V en "Voltaje en bornes" con la condición "Reposo" | ScanIA dice "Medición inválida" y no la guarda | | No probada |
+| EL-13 | Corto a tierra sin desconectar cargas (3.1) | Con el diagrama, elegí un fusible de luces; fusible fuera, sin desconectar los bombillos, medí a tierra del lado de la carga | Mide pocos ohmios (por el bombillo): ScanIA dice "Probable", no "corto". Si desconectás todos los bombillos y marcás la casilla, debe medir abierto | | No probada |
 
 ## 6. Qué mandar después de las pruebas
 
@@ -121,5 +123,6 @@ Con eso se corrigen los detalles reales de tus adaptadores y del CR-V, y recién
 
 | Fecha | Equipo | Carro | Lo que se observó | Estado |
 |---|---|---|---|---|
-| — | — | — | Sistema eléctrico (3.0): ninguna prueba física hecha todavía (EL-01 a EL-11). | No probada |
+| — | — | — | Sistema eléctrico (3.0 y 3.1): ninguna prueba física hecha todavía (EL-01 a EL-13). | No probada |
+| 2026-11-26 | — | Sin confirmar | Llegaron dos fotos de tapas: interior `S10-A0` y motor `S10-E0` (inglés y japonés). Se usaron para la disposición física y para marcar diferencias con las tablas (posiciones 1, 20, 24 y 10 del motor). **No se sabe si son del CR-V del usuario.** No es una prueba física: EL-01 y EL-02 siguen sin hacer. Las fotos no se subieron al repositorio. | No probada |
 | 2026-11-22 | Laptop con Windows (adaptador sin identificar todavía) | Carro real; según el contexto, el Honda CR-V (falta confirmar) | Conectó y leyó 7 códigos (P0300, P0301, P0303, P0304, P0730, P0135 y uno más). La prueba "Fallos de encendido" dio **no concluyente** por ser protocolo no CAN, como corresponde, y avisó de 2 resultados fuera de límite en el modo 06. Se encontró un texto cortado en las condiciones de esa prueba (corregido). | CR-07 y lectura de modo 06 no CAN: **funcionan en un carro real** (pendiente confirmar modelo y adaptador para marcarlas como aprobadas) |

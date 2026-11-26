@@ -1,6 +1,8 @@
 # Auditoría independiente — ScanIA 3.0 (módulo eléctrico)
 
 **Código auditado:** rama `main`, commit `c73c411` (ScanIA 3.0).
+
+> **Seguimiento:** las correcciones de la fase 2 están en la versión 3.1 (commit `e73fbc9`). Estado de cada hallazgo: [REGISTRO_DE_CAMBIOS_3_1.md](REGISTRO_DE_CAMBIOS_3_1.md). Este documento no se modificó después de la fase 1, salvo esta nota.
 **Fase 1:** solo lectura y pruebas contra el código tal como estaba. No se cambió código antes de terminar este documento.
 **Fase 2:** las correcciones están al final y en [REGISTRO_DE_CAMBIOS_3_1.md](REGISTRO_DE_CAMBIOS_3_1.md).
 
