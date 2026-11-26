@@ -17,10 +17,13 @@ test("ficha: cada dato tiene fuente y nivel de verificación; no se aceptan dato
   }
   for (const r of S.relesDe(V)) assert.ok(r.fuentes.length && S.VERIFICACION[r.verificacion], r.id);
   // Las posiciones donde las fuentes no coinciden quedan "en conflicto", no se elige una a escondidas
-  assert.equal(doc("MOT-4").verificacion, "conflicto");
-  assert.equal(doc("MOT-5").verificacion, "conflicto");
-  // Ningún relé tiene posición inventada
-  for (const r of S.relesDe(V)) assert.equal(r.posicion, null, `${r.id} no debería tener posición sin fuente`);
+  assert.equal(doc("INT-20").verificacion, "conflicto");
+  assert.deepEqual(doc("INT-20").amperajes_posibles, [7.5, 10]);
+  // La etiqueta S10-E0 resolvió las posiciones 4 y 5 del motor (y queda registrada como fuente)
+  assert.ok(doc("MOT-4").fuentes.includes("foto_tapa_s10_e0") && doc("MOT-5").fuentes.includes("foto_tapa_s10_e0"));
+  // Ningún relé tiene posición sin una fuente que la dé (la foto de la etiqueta cuenta como fuente, con su nivel)
+  for (const r of S.relesDe(V)) if (r.posicion) assert.ok(r.fuentes.includes("foto_tapa_s10_e0") && r.verificacion === "etiqueta_foto", `${r.id}: posición sin fuente`);
+  assert.ok(S.relesDe(V).some((r) => r.id === "R-PGMFI" && !r.posicion), "el relé PGM-FI no tiene posición confirmada");
   // Sin diagramas ni valores de referencia inventados
   assert.equal(V.diagramas.length, 0);
   assert.equal(V.valores_referencia.length, 0);
@@ -38,8 +41,9 @@ test("fusibles: visual = probable; con multímetro = confirmado", () => {
   assert.equal(S.evaluarFusible(doc("INT-26"), { estado: "quemado", metodo: "voltaje" }).estado, "quemado");
   assert.equal(S.evaluarFusible(doc("INT-26"), {}).estado, "pendiente");
   assert.equal(S.evaluarFusible(doc("INT-19"), { estado: "ausente" }).estado, "ausente");
-  assert.equal(S.evaluarFusible(doc("INT-1"), {}).estado, "libre");
-  assert.equal(S.evaluarFusible(doc("INT-1"), { estado: "bien" }).estado, "desconocida", "fusible en una posición 'no usada'");
+  assert.equal(S.evaluarFusible(doc("INT-2"), {}).estado, "libre");
+  assert.equal(S.evaluarFusible(doc("INT-2"), { estado: "bien" }).estado, "desconocida", "fusible en una posición 'no usada'");
+  assert.equal(S.evaluarFusible(doc("INT-1"), { estado: "ausente" }).estado, "libre", "posición opcional vacía: normal si no trae antiniebla");
 });
 
 test("fusibles: NUNCA se recomienda un fusible de más amperaje", () => {
@@ -64,14 +68,14 @@ test("fusibles: NUNCA se recomienda un fusible de más amperaje", () => {
 });
 
 test("fusibles: con fuentes en conflicto o sin documentación no se juzga el amperaje", () => {
-  const e = S.evaluarFusible(doc("MOT-4"), { estado: "bien", metodo: "visual", amperaje_obs: 30 });
+  const e = S.evaluarFusible(doc("INT-20"), { estado: "bien", metodo: "visual", amperaje_obs: 30 });
   assert.equal(e.estado, "desconocida");
   assert.ok(e.mensajes.some((x) => x.includes(S.PENDIENTE_FUSIBLE)));
   const n = S.evaluarFusible(null, { estado: "bien", amperaje_obs: 15 });
   assert.equal(n.estado, "desconocida");
   assert.ok(n.mensajes[0].includes(S.PENDIENTE_FUSIBLE));
   // Confirmado con la tapa: el dato pasa a ser del dueño
-  const c = S.evaluarFusible(doc("MOT-4"), { estado: "bien", metodo: "visual", amperaje_obs: 30, confirmado_tapa: true });
+  const c = S.evaluarFusible(doc("INT-20"), { estado: "bien", metodo: "visual", amperaje_obs: 30, confirmado_tapa: true });
   assert.equal(c.verificacion, "dueno");
   assert.equal(c.estado, "amperaje");
 });
@@ -107,7 +111,8 @@ test("mediciones: sin especificación no hay veredicto inventado", () => {
   assert.equal(S.evaluarMedicion({ prueba: "alimentacion_componente", valor: 0.0 }, null).veredicto, "fuera");
   assert.equal(S.evaluarMedicion({ prueba: "alimentacion_componente", valor: 4.9 }, null).veredicto, "sin_referencia", "5 V no se da por bueno sin el manual");
   assert.equal(S.evaluarMedicion({ prueba: "fusible_continuidad", valor: "no" }).veredicto, "fuera");
-  assert.equal(S.evaluarMedicion({ prueba: "corto_tierra", valor: "si" }).veredicto, "fuera");
+  assert.equal(S.evaluarMedicion({ prueba: "corto_tierra", valor: "si" }).veredicto, "probable", "sin confirmar que las cargas están desconectadas no es un corto confirmado");
+  assert.equal(S.evaluarMedicion({ prueba: "corto_tierra", valor: "si", cargas_desconectadas: true }).veredicto, "fuera");
   assert.equal(S.evaluarMedicion({ prueba: "corto_tierra", valor: "no" }).veredicto, "dentro");
   assert.equal(S.evaluarMedicion({ prueba: "rele_bobina", valor: 1e9 }, null).veredicto, "fuera");
   // Guía general: queda marcada como orientativa
@@ -142,7 +147,7 @@ test("sensores: no se recomienda cambiar el componente antes de verificar alimen
   assert.equal(r1.id, "componente");
   assert.equal(r1.certeza, "sospecha", "sin tierra verificada no es confirmado");
   assert.match(r1.no_cambiar, /Todavía no/);
-  const r2 = S.diferenciarFalla("ect", { tierra: 0.05, continuidad_senal: "si", resistencia: 90000, resistencia_spec: { min: 2000, max: 3000, fuente: "x" } });
+  const r2 = S.diferenciarFalla("ect", { tierra: 0.05, continuidad_senal: "si", conector: "bien", resistencia: 90000, resistencia_spec: { min: 2000, max: 3000, fuente: "x" } });
   assert.equal(r2.certeza, "confirmada");
   assert.equal(S.diferenciarFalla("ect", { continuidad_senal: "no" }).id, "cable_abierto");
   assert.equal(S.diferenciarFalla("ect", { tierra: 12.3, bateria: 12.6 }).id, "tierra_abierta");
@@ -152,7 +157,7 @@ test("sensores: no se recomienda cambiar el componente antes de verificar alimen
   assert.equal(p.id, "pendiente");
   assert.ok(p.pendiente.length >= 3);
   // La computadora es lo último
-  const ecu = S.diferenciarFalla("ect", { tierra: 0.05, continuidad_senal: "si", corto_tierra: "no", resistencia: 2500, resistencia_spec: { min: 2000, max: 3000, fuente: "x" }, senal_ok: false });
+  const ecu = S.diferenciarFalla("ect", { tierra: 0.05, continuidad_senal: "si", corto_tierra: "no", conector: "bien", resistencia: 2500, resistencia_spec: { min: 2000, max: 3000, fuente: "x" }, senal_ok: false });
   assert.equal(ecu.id, "computadora");
   assert.equal(ecu.certeza, "sospecha");
 });

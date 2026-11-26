@@ -586,6 +586,28 @@ details.el-sistemas summary, details.el-seguridad summary, details.el-avisos sum
 .el-busqueda { padding-left: 0; list-style: none; }
 .el-busqueda li { padding: 6px 0; border-bottom: 1px solid var(--borde); }
 
+/* 3.1 · niveles de evidencia, disposición física, circuitos */
+.niv { display: inline-block; font-size: .72rem; font-weight: 600; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--borde); vertical-align: middle; white-space: nowrap; }
+.niv.confirmado { background: rgba(46,180,110,.18); border-color: var(--verde); color: var(--verde); }
+.niv.probable { background: rgba(245,165,36,.16); border-color: var(--ambar); color: var(--ambar); }
+.niv.sospechoso { background: rgba(245,130,36,.16); border-color: #f58224; color: #f58224; }
+.niv.no_verificable { background: rgba(239,77,77,.16); border-color: var(--rojo); color: var(--rojo); }
+.niv.requiere_medicion { background: rgba(80,140,240,.16); border-color: var(--azul); color: var(--azul); }
+.niv.requiere_documentacion { background: var(--fondo); color: var(--tenue); }
+.el-caja-scroll { overflow-x: auto; max-width: 100%; padding-bottom: 4px; }
+.el-caja.fisica { grid-template-columns: repeat(var(--cols), minmax(40px, 1fr)); grid-template-rows: repeat(var(--filas), auto); max-width: 760px; min-width: calc(var(--cols) * 44px); }
+.el-caja.fisica.ampliada { grid-template-columns: repeat(var(--cols), minmax(96px, 1fr)); max-width: none; min-width: calc(var(--cols) * 100px); }
+.el-caja.fisica .fz-nom { font-size: .62rem; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.fz-celda.repuesto { cursor: default; border-style: dashed; opacity: .6; }
+.fz-celda.rele { border-style: double; border-width: 3px; background: rgba(80,140,240,.10); justify-content: center; }
+.fz-marca-l { display: inline-block; font-weight: 700; color: var(--ambar); margin-right: 2px; }
+.ver.invalida { color: var(--rojo); }
+.ver.probable, .ver.sin_referencia, .ver.incompleto { color: var(--ambar); }
+.aviso-diag { margin: 4px 0; font-size: .84rem; }
+.ci-lista li { margin-bottom: 8px; }
+.ci-tramo { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; border: 1px dashed var(--borde); border-radius: 8px; padding: 8px; margin: 6px 0; }
+.ci-tramo > .nota { grid-column: 1 / -1; }
+
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -5397,6 +5419,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     dueno: { nombre: "Confirmado en tu carro", detalle: "Lo confirmaste con la etiqueta de la tapa o con el manual de tu carro." },
     oem: { nombre: "Documentación del fabricante", detalle: "Sale de un documento del fabricante para esta variante." },
     secundaria_coincidente: { nombre: "Fuentes secundarias que coinciden", detalle: "Varias publicaciones que reproducen el manual coinciden, pero no se comparó con el documento original ni con tu caja." },
+    etiqueta_foto: { nombre: "Etiqueta de una tapa (foto de origen no confirmado)", detalle: "Se leyó en la foto de una tapa original, pero no se sabe si es de tu carro ni de tu mercado." },
     una_fuente: { nombre: "Una sola fuente secundaria", detalle: "Solo una publicación lo dice. Confirmalo antes de usarlo." },
     conflicto: { nombre: "Fuentes en conflicto", detalle: "Las publicaciones no coinciden. Configuración del fusible pendiente de verificación." },
     desconocido: { nombre: "Sin información", detalle: "No hay una fuente verificable. Configuración del fusible pendiente de verificación." },
@@ -5421,10 +5444,17 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
           for (const id of x.fuentes) if (!fuentes.has(id)) throw new Error(`${x.id}: fuente desconocida ${id}`);
           if (!S.VERIFICACION[x.verificacion]) throw new Error(`${x.id}: nivel de verificación inválido`);
           if (x.amperaje != null && !(x.amperaje > 0)) throw new Error(`${x.id}: amperaje inválido`);
+          if (x.terminales && (!x.terminales_fuente || !fuentes.has(x.terminales_fuente))) throw new Error(`${x.id}: terminales sin fuente`);
         }
+        if (c.disposicion && (!c.disposicion.fuente || !fuentes.has(c.disposicion.fuente))) throw new Error(`Caja ${c.id}: la disposición física necesita fuente`);
       }
       for (const d of v.diagramas || []) if (!d.fuente || !fuentes.has(d.fuente)) throw new Error(`Diagrama ${d.id}: falta la fuente`);
       for (const r of v.valores_referencia || []) if (!r.fuente || !fuentes.has(r.fuente)) throw new Error(`Valor ${r.id}: falta la fuente`);
+      for (const r of v.reles_sueltos || []) {
+        if (!r.fuentes || !r.fuentes.length || r.fuentes.some((id) => !fuentes.has(id))) throw new Error(`${r.id}: falta la fuente`);
+        if (!S.VERIFICACION[r.verificacion]) throw new Error(`${r.id}: nivel de verificación inválido`);
+      }
+      for (const ci of v.circuitos || []) { const e = S.validarCircuito ? S.validarCircuito(ci) : []; if (e.length) throw new Error(`Circuito ${ci.id}: ${e[0]}`); if (!fuentes.has(ci.fuente)) throw new Error(`Circuito ${ci.id}: fuente desconocida`); }
     }
     fichas.push(f);
     return f;
@@ -5467,17 +5497,31 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     { id: "startmycar", tipo: "secundaria", nombre: "startmycar.com — 2000 Honda CR-V fuse box (usa numeración propia)",
       url: "https://www.startmycar.com/us/honda/cr-v/info/fusebox/2000", uso: "Nombres de los relés de la caja bajo el capó y del ABS (sin posición confirmada)." },
     { id: "fuseandrelay", tipo: "secundaria", nombre: "fuseandrelay.com — Honda CR-V 1ra generación (mercado no identificado)",
-      url: "https://fuseandrelay.com/?p=15260", uso: "Muestra una distribución DISTINTA (otro mercado). Se usa solo para advertir que hay variantes y para nombres de relés." },
+      url: "https://fuseandrelay.com/?p=15260", uso: "Muestra una distribución DISTINTA (otro mercado). Se usa solo para advertir que hay variantes, para nombres de relés y para la relación de los fusibles 13 y 31 con el relé principal PGM-FI." },
+    { id: "foto_tapa_s10_a0", tipo: "foto_usuario", nombre: "Foto de la etiqueta de una tapa de caja interior con código S10-A0 (aportada por el usuario el 26/11/2026; no se sabe si es de su carro ni de qué mercado)",
+      url: "", uso: "Disposición física de la caja interior (3 filas de 11 + 4 repuestos), equipo opcional (amperajes entre paréntesis), posición 1 (antiniebla 20 A), posición 20 (10 A, lectura probable) y techo corredizo en la 24." },
+    { id: "foto_tapa_s10_e0", tipo: "foto_usuario", nombre: "Foto de la etiqueta de una tapa de caja del motor con código S10-E0, texto en inglés y japonés (aportada por el usuario el 26/11/2026; no se sabe si es de su carro ni de qué mercado)",
+      url: "", uso: "Disposición física de la caja del motor y de sus 4 relés; confirma 40 A vidrios y 40 A 'option' (resuelve las posiciones 4 y 5); 'DR LOCK UNIT, ROOF'. La tapa no trae números de posición." },
+    { id: "go_parts_crv", tipo: "secundaria", nombre: "go-parts.com — Honda CR-V (1997-2006) relay failures (publicación de un vendedor de repuestos)",
+      url: "https://www.go-parts.com/garage/ps-1997-2006-honda-cr-v-relay", uso: "Señala el relé principal PGM-FI como sospechoso de 'da arranque pero no enciende, sobre todo en caliente' y el relé del embrague del A/C como primera revisión si el A/C sopla caliente." },
+    { id: "itstillruns_crv", tipo: "secundaria", nombre: "itstillruns.com — How to Replace the Main Relay in a Honda CR-V",
+      url: "https://itstillruns.com/replace-main-relay-honda-crv-4509219.html", uso: "Ubica el relé principal PGM-FI de los CR-V 1997–2000 del lado del pasajero, detrás del tablero y la guantera (una sola fuente, sin verificar)." },
   ];
 
   // Interior (debajo del tablero, lado del conductor). Tres fuentes secundarias coinciden en número, amperaje y circuito.
   const F3 = ["fuse_box_info", "fuseboxinfo_com", "autogenius"];
+  // Posición física según la etiqueta de la foto S10-A0: fila 3 = posiciones 1–11, fila 2 = 12–22, fila 1 = 23–33; columna 1 = repuestos.
+  const filaColInt = (n) => (n >= 1 && n <= 33 ? { fila: n <= 11 ? 3 : n <= 22 ? 2 : 1, col: 1 + (n <= 11 ? n : n <= 22 ? n - 11 : n - 22) } : null);
+  const FF = [...F3, "foto_tapa_s10_a0"];
   const fi = (n, a, nombre, circuito, componentes = [], sintomas = [], extra = {}) => ({
-    id: `INT-${n}`, numero: n, amperaje: a, nombre, circuito, componentes, sintomas, fuentes: extra.fuentes || F3,
+    id: `INT-${n}`, numero: n, amperaje: a, nombre, circuito, componentes, sintomas, fuentes: extra.fuentes || (n <= 33 ? FF : F3), fisica: filaColInt(n), opcional: !!extra.opcional, tipo: null,
     verificacion: extra.verificacion || "secundaria_coincidente", nota: extra.nota || "", libre: !a, repuesto: !!extra.repuesto, condicion: extra.condicion || "",
+    amperajes_posibles: extra.amperajes_posibles || null,
   });
   const INTERIOR = [
-    fi(1, null, "No usado", "—"), fi(2, null, "No usado", "—"),
+    fi(1, 20, "Luces antiniebla delanteras (opcional)", "Luces antiniebla delanteras (FR FOG LIGHTS)", ["Relé y luces antiniebla"], ["No encienden las antiniebla"],
+      { opcional: true, fuentes: ["foto_tapa_s10_a0", ...F3], verificacion: "etiqueta_foto", nota: "Las tablas de EE. UU. la dan como 'no usada'; la etiqueta S10-A0 la asigna a las antiniebla delanteras con (20A) entre paréntesis (equipo opcional). Si tu carro no tiene antiniebla, es normal que esté vacía." }),
+    fi(2, null, "No usado", "—"),
     fi(3, 10, "Limpiaparabrisas y lavador trasero", "Limpiaparabrisas trasero y su lavador", ["Motor del limpiaparabrisas trasero", "Bomba del lavador"], ["No funciona el limpiaparabrisas trasero"]),
     fi(4, 10, "Luz alta derecha", "Faro derecho, luz alta", ["Bombillo de luz alta derecha"], ["No enciende la luz alta derecha"]),
     fi(5, 10, "Luz alta izquierda", "Faro izquierdo, luz alta", ["Bombillo de luz alta izquierda"], ["No enciende la luz alta izquierda"]),
@@ -5490,63 +5534,71 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     fi(12, 7.5, "Direccionales", "Luces direccionales", ["Relé/destellador de direccionales", "Switch de direccionales"], ["No funcionan las direccionales"]),
     fi(13, 15, "Bomba de gasolina / unidad SRS", "Bomba de gasolina (a través del relé principal PGM-FI) y unidad SRS", ["Relé principal PGM-FI", "Bomba de gasolina", "Unidad SRS"], ["El motor da arranque pero no enciende (sin gasolina)", "Luz de SRS encendida"],
       { nota: "Las fuentes lo escriben 'Fuel Pump (SRS Unit)'. Una fuente de otro mercado lo describe como relé principal PGM-FI + bomba + unidad SRS." }),
-    fi(14, 7.5, "Control de crucero", "Control de velocidad crucero", ["Unidad del crucero"], ["No funciona el crucero"]),
+    fi(14, 7.5, "Control de crucero", "Control de velocidad crucero", ["Unidad del crucero"], ["No funciona el crucero"], { opcional: true }),
     fi(15, 7.5, "Alternador (señal IG) y sensor de velocidad", "Señal de encendido del alternador (ACG) y sensor de velocidad (SP SENSOR)", ["Alternador (señal de excitación)", "Sensor de velocidad del vehículo"], ["Luz de carga encendida / batería que se descarga", "Velocímetro en cero", "Código P0500"],
       { nota: "Una fuente de otro mercado le atribuye además el detector de carga eléctrica (ELD), EVAP y sensores de oxígeno: no confirmado para esta variante." }),
-    fi(16, 7.5, "ABS", "Unidad de control del ABS", ["Unidad de control del ABS"], ["Luz de ABS encendida"]),
+    fi(16, 7.5, "ABS", "Unidad de control del ABS", ["Unidad de control del ABS"], ["Luz de ABS encendida"], { opcional: true }),
     fi(17, 7.5, "Relés de calefacción y A/C", "Bobinas de los relés de calefacción y aire acondicionado", ["Relé del soplador", "Relé del compresor A/C", "Relés de ventiladores"], ["No funciona el soplador o el A/C"]),
-    fi(18, 7.5, "Relé de luces de circulación diurna", "Luces diurnas (DRL)", ["Relé de DRL"], ["No encienden las luces diurnas"], { condicion: "Solo modelo canadiense" }),
+    fi(18, 7.5, "Relé de luces de circulación diurna", "Luces diurnas (DRL)", ["Relé de DRL"], ["No encienden las luces diurnas"], { condicion: "Solo modelo canadiense", opcional: true }),
     fi(19, 7.5, "Luces de reversa", "Luces de reversa", ["Switch de posición de la palanca", "Bombillos de reversa"], ["No encienden las luces de reversa"]),
-    fi(20, 7.5, "Luces de circulación diurna", "Luces diurnas (DRL)", ["Bombillos/unidad DRL"], ["No encienden las luces diurnas"], { condicion: "Solo modelo canadiense" }),
+    fi(20, 7.5, "Luces de circulación diurna", "Luces diurnas (DRL)", ["Bombillos/unidad DRL"], ["No encienden las luces diurnas"],
+      { condicion: "Solo modelo canadiense según las tablas", opcional: true, verificacion: "conflicto", amperajes_posibles: [7.5, 10],
+        nota: "Las tablas dicen 7.5 A; la etiqueta S10-A0 parece decir (10A) RUNNING LIGHTS (lectura probable: hay brillo en la foto). Confirmalo con tu tapa." }),
     fi(21, 10, "Luz baja derecha", "Faro derecho, luz baja", ["Bombillo de luz baja derecha"], ["No enciende la luz baja derecha"]),
     fi(22, 10, "Luz baja izquierda", "Faro izquierdo, luz baja", ["Bombillo de luz baja izquierda"], ["No enciende la luz baja izquierda"]),
-    fi(23, 10, "SRS (bolsas de aire)", "Unidad SRS", ["Unidad SRS"], ["Luz de SRS encendida"], { nota: "Sistema de bolsas de aire: solo inspección visual del fusible; cualquier prueba en el circuito es para personal capacitado." }),
-    fi(24, 7.5, "Relé de vidrios eléctricos", "Bobina del relé de vidrios eléctricos", ["Relé de vidrios eléctricos"], ["No funciona ningún vidrio eléctrico"]),
+    fi(23, 10, "SRS (bolsas de aire)", "Unidad SRS", ["Unidad SRS"], ["Luz de SRS encendida"], { nota: "Sistema de bolsas de aire: solo inspección visual del fusible; cualquier prueba en el circuito es para personal capacitado.", opcional: true }),
+    fi(24, 7.5, "Relé de vidrios eléctricos (y del techo corredizo)", "Bobina del relé de vidrios eléctricos y del techo corredizo (P/W RELAY / SUNROOF RELAY en la etiqueta)", ["Relé de vidrios eléctricos", "Relé del techo corredizo (si tiene)"], ["No funciona ningún vidrio eléctrico"]),
     fi(25, 7.5, "Tablero de instrumentos", "Medidores e indicadores del tablero", ["Tablero de instrumentos"], ["Agujas o testigos del tablero sin funcionar"]),
     fi(26, 20, "Limpiaparabrisas y lavador delantero", "Limpiaparabrisas y lavador delanteros", ["Motor del limpiaparabrisas", "Bomba del lavador"], ["No funcionan los limpiaparabrisas delanteros"]),
-    fi(27, 10, "Toma de corriente delantera", "Encendedor / toma de accesorios delantera", ["Toma de corriente delantera"], ["No funciona la toma delantera (cargador del teléfono)"]),
+    fi(27, 10, "Toma de corriente delantera", "Encendedor / toma de accesorios delantera", ["Toma de corriente delantera"], ["No funciona la toma delantera (cargador del teléfono)"], { opcional: true }),
     fi(28, 10, "Radio", "Radio (alimentación con llave)", ["Radio"], ["El radio no enciende"]),
     fi(29, null, "No usado", "—"),
     fi(30, 7.5, "Iluminación del tablero", "Luces del tablero y mandos", ["Iluminación de instrumentos"], ["No se ilumina el tablero de noche"]),
     fi(31, 7.5, "Señal de arranque", "Señal de arranque (STARTER SIGNAL)", ["Circuito de arranque", "Computadora (señal de arranque)"], ["No da arranque o arranca con dificultad"]),
     fi(32, 7.5, "Luz de placa y luces traseras", "Luces de posición traseras y de placa", ["Bombillos traseros y de placa"], ["No encienden las luces traseras"]),
-    fi(33, 7.5, "Unidad de bloqueo (interlock)", "Bloqueo de la palanca y de la llave", ["Unidad interlock", "Solenoide de bloqueo de palanca"], ["La palanca no sale de P", "La llave no sale"]),
+    fi(33, 7.5, "Unidad de bloqueo (interlock)", "Bloqueo de la palanca y de la llave", ["Unidad interlock", "Solenoide de bloqueo de palanca"], ["La palanca no sale de P", "La llave no sale"], { opcional: true }),
     fi(34, 7.5, "Repuesto", "Fusible de repuesto", [], [], { repuesto: true }), fi(35, 10, "Repuesto", "Fusible de repuesto", [], [], { repuesto: true }),
     fi(36, 15, "Repuesto", "Fusible de repuesto", [], [], { repuesto: true }), fi(37, 20, "Repuesto", "Fusible de repuesto", [], [], { repuesto: true }),
     fi(38, null, "No usado", "—"),
   ];
 
-  // Bajo el capó. Dos fuentes coinciden en todo; una tercera difiere en las posiciones 4 y 5.
+  // Bajo el capó. Dos fuentes coinciden en todo; una tercera difería en las posiciones 4 y 5 y la etiqueta S10-E0 le da la razón a las dos primeras.
+  // Posición física (fila, columna, ocupa filas/columnas) según la foto de la etiqueta S10-E0; la numeración sale de las tablas, la etiqueta no trae números.
   const F2 = ["fuse_box_info", "fuseboxinfo_com"];
-  const fm = (n, a, nombre, circuito, componentes = [], sintomas = [], extra = {}) => ({
-    id: `MOT-${n}`, numero: n, amperaje: a, nombre, circuito, componentes, sintomas, principal: !!extra.principal,
-    fuentes: extra.fuentes || [...F2, "autogenius"], verificacion: extra.verificacion || "secundaria_coincidente", nota: extra.nota || "",
-    tipo_fusible: extra.tipo || "", condicion: "",
-  });
+  const FISICA_MOT = { 13: [1, 1], 14: [1, 2], 10: [1, 3], 12: [1, 4], 11: [1, 5], 15: [2, 1], 4: [2, 2], 3: [2, 3], 7: [2, 4], 2: [3, 1, 2, 1], 5: [3, 4], 6: [4, 3], 8: [4, 4], 9: [5, 4], 1: [6, 3, 1, 2] };
+  const fm = (n, a, nombre, circuito, componentes = [], sintomas = [], extra = {}) => {
+    const f = FISICA_MOT[n];
+    return { id: `MOT-${n}`, numero: n, amperaje: a, nombre, circuito, componentes, sintomas, principal: !!extra.principal,
+      fuentes: extra.fuentes || [...F2, "autogenius", "foto_tapa_s10_e0"], verificacion: extra.verificacion || "secundaria_coincidente", nota: extra.nota || "",
+      tipo: null, condicion: "", opcional: !!extra.opcional, fisica: f ? { fila: f[0], col: f[1], filas: f[2] || 1, cols: f[3] || 1 } : null };
+  };
   const MOTOR = [
-    fm(1, 100, "Principal de batería", "Alimentación general desde la batería", ["Batería", "Caja de fusibles interior", "Todos los circuitos"], ["Nada eléctrico funciona", "El carro está 'muerto'"], { principal: true, tipo: "Fusible principal grande" }),
-    fm(2, 40, "Principal de encendido y arranque", "Circuito del switch de encendido y arranque", ["Switch de encendido", "Relé/solenoide de arranque", "Circuitos con llave"], ["No da arranque y el tablero no enciende con la llave", "Varios sistemas sin alimentación a la vez"], { principal: true }),
+    fm(1, 100, "Principal de batería", "Alimentación general desde la batería", ["Batería", "Caja de fusibles interior", "Todos los circuitos"], ["Nada eléctrico funciona", "El carro está 'muerto'"], { principal: true }),
+    fm(2, 40, "Principal de encendido y arranque (IG1)", "Circuito del switch de encendido y arranque", ["Switch de encendido", "Relé/solenoide de arranque", "Circuitos con llave"], ["No da arranque y el tablero no enciende con la llave", "Varios sistemas sin alimentación a la vez"], { principal: true }),
     fm(3, 20, "Desempañador trasero", "Resistencia del vidrio trasero", ["Desempañador trasero", "Relé del desempañador"], ["No desempaña el vidrio trasero"]),
     fm(4, 40, "Vidrios eléctricos", "Alimentación principal de los vidrios eléctricos", ["Relé de vidrios", "Fusibles 7, 8, 10, 11 interiores"], ["No funciona ningún vidrio"],
-      { fuentes: [...F2, "autogenius"], verificacion: "conflicto", nota: "fuse-box.info y fuseboxinfo.com: 40 A vidrios eléctricos. autogenius.info: 40 A 'Option'." }),
+      { fuentes: [...F2, "foto_tapa_s10_e0"], nota: "Amperaje y función confirmados por la etiqueta S10-E0 (40A POWER WINDOW) y por dos tablas. autogenius.info lo daba distinto: estaba equivocada. El número 4 sale de las tablas." }),
     fm(5, 40, "Opcional (option)", "Circuito opcional / accesorio", [], [],
-      { fuentes: [...F2, "autogenius"], verificacion: "conflicto", nota: "fuse-box.info y fuseboxinfo.com: 40 A 'Option'. autogenius.info: 30 A motor del soplador." }),
+      { fuentes: [...F2, "foto_tapa_s10_e0"], nota: "La etiqueta S10-E0 dice 40A OPTION y muestra un solo HEATER MOTOR (40 A): la tercera fuente, que ponía aquí un 30 A del soplador, estaba equivocada. El número 5 sale de las tablas. Qué conecta 'option' no está documentado." }),
     fm(6, 30, "Faros", "Alimentación de los faros", ["Switch de luces", "Fusibles 4, 5, 21, 22 interiores"], ["No enciende ningún faro"]),
     fm(7, 40, "Motor del soplador (calefacción)", "Motor del ventilador de la cabina", ["Motor del soplador", "Relé del soplador", "Resistencia de velocidades"], ["No sale aire por las rejillas"]),
     fm(8, 10, "Luces de emergencia", "Intermitentes de emergencia", ["Switch de emergencia", "Destellador"], ["No funcionan las luces de emergencia"]),
     fm(9, 15, "Claxon y luces de freno", "Claxon y luces de freno", ["Relé del claxon", "Switch de luces de freno"], ["No suena el claxon", "No encienden las luces de freno"]),
-    fm(10, 20, "Seguros eléctricos", "Unidad de seguros eléctricos", ["Unidad de seguros", "Motores de seguros"], ["No funcionan los seguros eléctricos"]),
+    fm(10, 20, "Seguros eléctricos y techo corredizo", "Unidad de seguros eléctricos y techo corredizo (DR LOCK UNIT, ROOF en la etiqueta)", ["Unidad de seguros", "Motores de seguros", "Techo corredizo (si tiene)"], ["No funcionan los seguros eléctricos", "No funciona el techo corredizo"]),
     fm(11, 20, "Ventilador del radiador", "Motor del ventilador del radiador", ["Relé del ventilador", "Motor del ventilador", "Switch/sensor de temperatura del ventilador"], ["El ventilador no enciende y el motor se calienta en el tráfico"]),
     fm(12, 20, "Ventilador del condensador", "Motor del ventilador del condensador (A/C)", ["Relé del ventilador del condensador", "Motor del ventilador"], ["El A/C enfría poco detenido", "Calentamiento con A/C encendido"]),
     fm(13, 15, "Computadora del motor (FI E/M, ECM/PCM)", "Alimentación de la inyección y la computadora", ["Computadora del motor (PCM)", "Relé principal PGM-FI"], ["El motor no enciende", "El escáner no conecta con la computadora", "Se apaga en marcha"]),
     fm(14, 7.5, "Memoria (radio)", "Alimentación permanente de memoria", ["Radio (memorias)", "Reloj"], ["El radio pierde las emisoras"]),
     fm(15, 7.5, "Luz interior", "Luces de cabina", ["Luz de techo", "Switches de puertas"], ["No enciende la luz de cabina"]),
   ];
+  // Relés de la caja del motor: nombres en tres fuentes; posición SOLO por la foto de la etiqueta S10-E0 (columna derecha). Sin terminales ni valores: no documentados.
+  const RF = ["startmycar", "fuseandrelay", "foto_tapa_s10_e0"];
   const RELES_MOTOR = [
-    { id: "MOT-R-VENT", nombre: "Relé del ventilador del radiador", posicion: null, fuentes: ["startmycar", "fuseandrelay"], verificacion: "una_fuente", nota: "Mencionado en la caja bajo el capó; la posición exacta no está confirmada." },
-    { id: "MOT-R-COND", nombre: "Relé del ventilador del condensador", posicion: null, fuentes: ["startmycar", "fuseandrelay"], verificacion: "una_fuente", nota: "Posición no confirmada." },
-    { id: "MOT-R-AC", nombre: "Relé del embrague del compresor A/C", posicion: null, fuentes: ["startmycar", "fuseandrelay"], verificacion: "una_fuente", nota: "Posición no confirmada. Es una falla conocida en esta generación según publicaciones de repuestos." },
-    { id: "MOT-R-SOPL", nombre: "Relé del motor del soplador", posicion: null, fuentes: ["startmycar", "fuseandrelay"], verificacion: "una_fuente", nota: "Posición no confirmada." },
+    { id: "MOT-R-SOPL", nombre: "Relé del motor del soplador (HEATER MOTOR RELAY)", posicion: "Columna derecha, 1.º desde arriba (según la foto de la etiqueta S10-E0)", fisica: { fila: 2, col: 5, filas: 1, cols: 1 }, fuentes: RF, verificacion: "etiqueta_foto", nota: "" },
+    { id: "MOT-R-VENT", nombre: "Relé del ventilador del radiador (COOLING FAN RELAY)", posicion: "Columna derecha, 2.º desde arriba (según la foto)", fisica: { fila: 3, col: 5, filas: 1, cols: 1 }, fuentes: RF, verificacion: "etiqueta_foto", nota: "" },
+    { id: "MOT-R-AC", nombre: "Relé del embrague del compresor A/C (MG. CLUTCH RELAY)", posicion: "Columna derecha, 3.º desde arriba (según la foto)", fisica: { fila: 4, col: 5, filas: 2, cols: 1 }, fuentes: [...RF, "go_parts_crv"], verificacion: "etiqueta_foto",
+      nota: "Una publicación de un vendedor de repuestos (go-parts) lo señala como la primera revisión si el A/C sopla caliente; no es un dato del fabricante." },
+    { id: "MOT-R-COND", nombre: "Relé del ventilador del condensador (CONDENSER FAN RELAY)", posicion: "Columna derecha, 4.º desde arriba (según la foto)", fisica: { fila: 6, col: 5, filas: 1, cols: 1 }, fuentes: RF, verificacion: "etiqueta_foto", nota: "" },
   ];
   const ABS = [
     { id: "ABS-1", numero: 1, amperaje: 7.5, nombre: "Revisión del motor del ABS (motor check)", circuito: "Monitoreo del motor de la bomba del ABS", componentes: ["Unidad del ABS"], sintomas: ["Luz de ABS encendida"], fuentes: ["fuse_box_info", "autogenius"], verificacion: "secundaria_coincidente", nota: "" },
@@ -5557,10 +5609,10 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
   S.registrarFicha({
     id: "honda_crv_2000_b20z",
     marca: "Honda", modelo: "CR-V", anios: "2000–2001 (1ra generación, RD1)", motor: "B20Z 2.0 L DOHC (verificar código en el bloque)",
-    transmision: "Automática de 4 velocidades (también existió manual)", traccion: "4x4 Real Time (también existió 4x2)",
+    transmision: "Automática (conocimiento general, sin fuente registrada: 4 velocidades; también existió manual)", traccion: "4x4 Real Time (también existió 4x2; sin fuente registrada)",
     sistema_electrico: "12 V, negativo a tierra",
-    protocolo: "OBD-II no CAN (lo vio ScanIA en la primera prueba real; se esperaba ISO 9141-2)",
-    equipamiento_nota: "A/C, dirección hidráulica, ABS opcional según versión (LX/EX/SE). La caja del ABS solo existe si el carro tiene ABS.",
+    protocolo: "OBD-II; protocolo exacto sin confirmar en este carro (se espera ISO 9141-2). En la prueba del 22/11/2026 un carro respondió como no CAN, pero no se confirmó que fuera este CR-V.",
+    equipamiento_nota: "A/C y dirección hidráulica según el dueño. En la etiqueta S10-A0, ABS, crucero, SRS, encendedor, interlock, luces diurnas y antiniebla aparecen entre paréntesis (equipo opcional). La caja del ABS solo existe si el carro tiene ABS.",
     perfil: "honda_crv_1g",
     coincide({ marca, modelo, anio }) {
       const m = String(marca || "").toLowerCase(), mo = String(modelo || "").toLowerCase().replace(/[\s-]/g, "");
@@ -5580,23 +5632,31 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       mercado: "EE. UU. y Canadá. En Honduras muchos CR-V de esta generación vienen importados de EE. UU.: confirmalo con la tapa.",
       cajas: [
         { id: "interior", nombre: "Caja interior", ubicacion: "Debajo del tablero, lado del conductor. La tapa se baja y se saca de sus bisagras.", fuente_ubicacion: "manualowl_267",
-          tipo_fusible: "Fusibles de hoja (tamaño por verificar: una fuente los lista como 'mini' y un vendedor de cajas usadas como 'estándar')",
-          columnas: 6, fusibles: INTERIOR, reles: [
-            { id: "INT-R-VIDRIOS", nombre: "Relé de vidrios eléctricos", posicion: null, fuentes: F3, verificacion: "secundaria_coincidente", nota: "Su alimentación es el fusible 24; la posición del relé no está confirmada." },
-            { id: "INT-R-CALEF", nombre: "Relé de calefacción / A/C", posicion: null, fuentes: F3, verificacion: "secundaria_coincidente", nota: "El fusible 17 alimenta su bobina; posición no confirmada." },
-          ] },
+          tipo_fusible: "No documentado (una fuente secundaria los lista como 'mini'; miralo en el fusible)",
+          columnas: 6, fusibles: INTERIOR, reles: [],
+          disposicion: { fuente: "foto_tapa_s10_a0", filas: 3, columnas: 13, repuestos: [[1, 1], [2, 1], [3, 1], [3, 13]],
+            aviso: "Disposición según la foto de una etiqueta S10-A0 (no se sabe si es de tu carro). La caja puede estar girada respecto a la etiqueta: ubicá cada fusible por el NOMBRE de la etiqueta. Las 4 casillas de repuesto no indican amperaje." } },
         { id: "motor", nombre: "Caja del compartimiento del motor", ubicacion: "En el compartimiento del motor. Se abre empujando la pestaña.", fuente_ubicacion: "manualowl_267",
-          tipo_fusible: "Fusibles grandes (100/40/30 A) y de hoja; en Honda de esa época los grandes se revisan por la ventanita y pueden ir atornillados — verificar en tu caja",
-          columnas: 5, fusibles: MOTOR, reles: RELES_MOTOR },
+          tipo_fusible: "No documentado (miralo en tu caja; los de 100 A y 40 A son más grandes que los de hoja)",
+          columnas: 5, fusibles: MOTOR, reles: RELES_MOTOR,
+          disposicion: { fuente: "foto_tapa_s10_e0", filas: 6, columnas: 5, repuestos: [],
+            aviso: "Disposición según la foto de una etiqueta S10-E0 con texto en inglés y japonés (no se sabe si es de tu carro ni de tu mercado). La etiqueta no trae números: la numeración sale de las tablas." } },
         { id: "abs", nombre: "Caja del ABS", ubicacion: "Compartimiento del motor, lado del pasajero. Solo en carros con ABS.", fuente_ubicacion: "manualowl_267",
           tipo_fusible: "Por verificar", columnas: 3, fusibles: ABS, reles: [
             { id: "ABS-R-MOTOR", nombre: "Relé del motor de la bomba del ABS", posicion: null, fuentes: ["startmycar", "fuseandrelay"], verificacion: "una_fuente", nota: "Posición no confirmada." },
           ] },
       ],
       reles_sueltos: [
-        { id: "R-PGMFI", nombre: "Relé principal PGM-FI (alimenta la computadora y la bomba de gasolina)", posicion: null, ubicacion: "Ubicación por verificar (una publicación lo ubica detrás de la guantera, lado del pasajero; otras, debajo del tablero)",
-          fuentes: ["fuseandrelay"], verificacion: "una_fuente", nota: "En Honda de esa época es una causa conocida de 'da arranque pero no enciende', sobre todo con calor. Confirmá ubicación y prueba con el manual de servicio." },
+        { id: "R-PGMFI", nombre: "Relé principal PGM-FI (alimenta la computadora y la bomba de gasolina)", posicion: null,
+          ubicacion: "No confirmada. Una sola publicación (itstillruns) lo ubica del lado del pasajero, detrás del tablero y la guantera, en los CR-V 1997–2000.",
+          fuentes: ["fuseandrelay", "itstillruns_crv", "go_parts_crv"], verificacion: "una_fuente",
+          nota: "Según una fuente, los fusibles 13 (interior) y 31 lo alimentan. Publicaciones secundarias lo señalan como sospechoso de 'da arranque pero no enciende, sobre todo en caliente'. Terminales y prueba: requieren el manual de servicio." },
+        { id: "INT-R-VIDRIOS", nombre: "Relé de vidrios eléctricos (y del techo corredizo)", posicion: null, ubicacion: "No documentada: las tablas y la etiqueta solo nombran el FUSIBLE 24 que alimenta su bobina.",
+          fuentes: FF, verificacion: "secundaria_coincidente", nota: "" },
+        { id: "INT-R-CALEF", nombre: "Relé de calefacción / A/C", posicion: null, ubicacion: "No documentada: las tablas solo nombran el FUSIBLE 17 que alimenta su bobina.",
+          fuentes: F3, verificacion: "secundaria_coincidente", nota: "" },
       ],
+      circuitos: [],
       diagramas: [],
       valores_referencia: [],
     }],
@@ -5607,7 +5667,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       { id: "tps", nombre: "Sensor de posición del acelerador (TPS)" },
       { id: "o2", nombre: "Sensores de oxígeno (antes y después del catalizador)" },
       { id: "vss", nombre: "Sensor de velocidad del vehículo (VSS)", nota: "Comparte el fusible 15 interior con la señal del alternador (según las tablas)." },
-      { id: "ckp", nombre: "Sensores de giro/posición (CKP/TDC/CYP)", nota: "En motores Honda B de la época suelen ir dentro del distribuidor: verificar." },
+      { id: "ckp", nombre: "Sensores de giro/posición (CKP/TDC/CYP)", nota: "Conocimiento general sin fuente registrada: en motores Honda B de la época suelen ir dentro del distribuidor. Verificar." },
       { id: "inyector", nombre: "Inyectores (4)" }, { id: "bobina", nombre: "Bobina de encendido (una, del distribuidor)" },
       { id: "iac", nombre: "Válvula de control de ralentí (IAC)" },
     ],
@@ -5629,6 +5689,17 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
   const PEND = () => S.PENDIENTE_FUSIBLE || "Configuración del fusible pendiente de verificación";
   const norm = (t) => String(t == null ? "" : t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   const r2 = (v) => (v == null || isNaN(v) ? "?" : Math.round(v * 100) / 100);
+
+  // ================================================================== escala única de evidencia
+  /** Toda conclusión del módulo eléctrico lleva uno de estos niveles. */
+  S.NIVELES_EVIDENCIA = {
+    confirmado: { nombre: "Confirmado", detalle: "Medido o comprobado físicamente, sin contradicciones." },
+    probable: { nombre: "Probable", detalle: "Lo indica una observación (a ojo o por foto) o una fuente secundaria; falta confirmarlo." },
+    sospechoso: { nombre: "Sospechoso", detalle: "Hipótesis apoyada por evidencia indirecta (códigos, síntomas, voltaje OBD)." },
+    no_verificable: { nombre: "No verificable", detalle: "Los datos se contradicen o son imposibles: hay que repetir la medición." },
+    requiere_medicion: { nombre: "Requiere medición física", detalle: "Hace falta medir con multímetro o revisar en persona." },
+    requiere_documentacion: { nombre: "Requiere documentación técnica", detalle: "Hace falta el manual de servicio o la etiqueta de la tapa de tu caja." },
+  };
 
   // ================================================================== seguridad
   S.SEGURIDAD_ELECTRICA = [
@@ -5700,6 +5771,9 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
         estado = "desconocida";
         mensajes.push("Hay un fusible en una posición documentada como 'no usada'. Puede ser otra variante o equipamiento, o un fusible fuera de lugar. Comparalo con la etiqueta de la tapa.");
       } else estado = "libre";
+    } else if (insp.estado === "ausente" && doc && doc.opcional) {
+      estado = "libre";
+      mensajes.push(`Posición de equipo opcional (${nombre}): si tu carro no trae ese equipo, es normal que esté vacía.`);
     } else if (insp.estado === "ausente") {
       estado = doc ? "ausente" : "desconocida";
       mensajes.push(`Falta el fusible de ${nombre}: ese circuito queda sin alimentación.`);
@@ -5727,7 +5801,17 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
 
     // Amperaje observado vs documentado
     const obs = insp.amperaje_obs != null && insp.amperaje_obs !== "" ? Number(insp.amperaje_obs) : null;
-    if (obs != null && amp && obs !== amp) {
+    // Amperaje leído en una foto: nunca cuenta como observado; solo pide mirarlo en persona.
+    const deFoto = insp.amperaje_foto != null && insp.amperaje_foto !== "" ? Number(insp.amperaje_foto) : null;
+    if (obs == null && deFoto != null && amp && deFoto !== amp) {
+      mensajes.push(`La foto sugiere ${deFoto} A (sin confirmar) donde la documentación dice ${amp} A. Mirá el fusible en persona y anotá su amperaje.`);
+      if (estado === "correcto" || estado === "pendiente") estado = "desconocida";
+    }
+    const posibles = doc && doc.amperajes_posibles;
+    if (obs != null && posibles && posibles.includes(obs) && obs !== amp) {
+      if (estado === "correcto" || estado === "pendiente") estado = "desconocida";
+      mensajes.push(`Tiene ${obs} A, que coincide con una de las fuentes (${posibles.join(" A / ")} A). ${PEND()}: confirmalo con la etiqueta de tu tapa.`);
+    } else if (obs != null && amp && obs !== amp) {
       if (!usable) {
         if (estado === "correcto" || estado === "pendiente") estado = "desconocida";
         mensajes.push(`Tiene ${obs} A; las fuentes dicen ${amp} A pero no coinciden entre sí (${(S.VERIFICACION[v] || {}).nombre || v}). ${PEND()}.`);
@@ -5745,10 +5829,10 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     }
 
     // Tipo
-    if (insp.tipo_obs && doc && doc.tipo_fusible && norm(insp.tipo_obs) !== norm(doc.tipo_fusible)) {
+    if (insp.tipo_obs && doc && doc.tipo && norm(insp.tipo_obs) !== norm(doc.tipo)) {
       if (estado === "correcto" || estado === "pendiente") estado = "tipo";
-      mensajes.push(`Tipo observado: ${insp.tipo_obs}; documentado: ${doc.tipo_fusible}.`);
-    }
+      mensajes.push(`Tipo observado: ${insp.tipo_obs}; documentado: ${doc.tipo}.`);
+    } else if (insp.tipo_obs && doc && !doc.tipo) mensajes.push(`Tipo observado: ${insp.tipo_obs}. El tipo de esta posición no está documentado: no se puede comparar.`);
 
     // Falso contacto en la caja
     if (insp.falso_contacto) {
@@ -5763,8 +5847,11 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     if (doc && !confiable && v !== "desconocido" && !doc.libre) mensajes.push(`Dato de documentación: ${(S.VERIFICACION[v] || {}).nombre}. Confirmalo con la etiqueta de la tapa.`);
     if (doc && doc.condicion) mensajes.push(`Aplica: ${doc.condicion}.`);
 
+    if (doc && doc.opcional && estado !== "libre") mensajes.push("Posición de equipo opcional: solo existe si tu carro trae ese equipo.");
     const e = S.ESTADOS_FUSIBLE[estado];
-    return { estado, nombre_estado: e.nombre, color: e.color, mensajes, acciones, verificacion: v, se_quema: seQuema };
+    const NIVEL = { correcto: metodoFisico ? "confirmado" : "probable", quemado: "confirmado", ausente: "confirmado", quemado_probable: "probable", amperaje: v === "dueno" || v === "oem" ? "confirmado" : "probable",
+      tipo: "probable", contacto: "probable", desconocida: "requiere_documentacion", pendiente: "requiere_medicion", libre: "probable" };
+    return { estado, nombre_estado: e.nombre, color: e.color, mensajes, acciones, verificacion: v, se_quema: seQuema, nivel: NIVEL[estado] || "requiere_medicion" };
   };
 
   /** Fusibles que parecen intercambiados entre posiciones (A tiene el amperaje de B y viceversa). */
@@ -5785,9 +5872,12 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
 
   /** Voltaje en los dos puntos de prueba del fusible (llave en ON y circuito activo). */
   S.evaluarVoltajeFusible = function ({ entrada, salida, bateria }) {
+    entrada = entrada == null ? null : Number(entrada); salida = salida == null ? null : Number(salida);
     const vb = Number(bateria) > 6 ? Number(bateria) : 12.0;
     const hay = (v) => v != null && v >= 0.8 * vb, nada = (v) => v != null && v < 0.5;
     if (entrada == null || salida == null) return { resultado: "incompleto", texto: "Faltan los dos voltajes." };
+    // No importa cuál lado se anotó primero: se ordenan (el lado con voltaje es la entrada).
+    [entrada, salida] = [Math.max(entrada, salida), Math.min(entrada, salida)];
     if (nada(entrada) && nada(salida)) return { resultado: "sin_alimentacion", texto: "No llega voltaje a ninguno de los dos lados: el fusible no es el problema; falta alimentación antes (fusible principal, relé, switch de encendido o cable). Confirmá que el circuito debía tener voltaje con la llave en ON." };
     if (hay(entrada) && nada(salida)) return { resultado: "abierto", texto: "Hay voltaje de batería en un lado y nada en el otro: el fusible está abierto (quemado)." };
     if (hay(entrada) && hay(salida)) return { resultado: "bien", texto: "Hay voltaje de batería en los dos lados: el fusible deja pasar corriente." };
@@ -5831,39 +5921,44 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       causas_fuera: ["Fusible abierto", "Falta alimentación antes del fusible (fusible principal, relé, switch de encendido)", "Falso contacto en la caja"], siguiente_ok: "El fusible deja pasar corriente: revisá relé, cable y componente.", siguiente_mal: "Según el resultado: cambiá el fusible (mismo amperaje) o buscá por qué no llega alimentación." },
     { id: "continuidad_cable", nombre: "Continuidad de un cable (circuito abierto)", para: "cable", herramienta: "Multímetro en continuidad", energizado: false, aislar: AISLAR_RES.concat(["Desconectá los conectores de los DOS extremos del cable que vas a medir."]),
       donde: "Una punta en el terminal del cable en un conector y la otra en el mismo cable en el otro conector (usá el diagrama para saber qué terminal es).", entrada: "continuidad", referencia: "fisica",
-      referencia_texto: "Criterio del fabricante en estas pruebas: debe haber continuidad. Sin continuidad (OL) = cable abierto. Si marca claramente más que con las puntas juntas, hay resistencia de más: hacé una caída de voltaje.",
+      referencia_texto: "Criterio general (físico): un cable sano tiene continuidad. Sin continuidad (OL) = cable abierto. Si marca claramente más que con las puntas juntas, hay resistencia de más: hacé una caída de voltaje. Ojo: la continuidad con el multímetro pasa por pocos hilos sanos; un cable casi cortado puede pitar y fallar con carga.",
       causas_fuera: ["Cable cortado o quebrado por dentro", "Terminal suelto o sulfatado en un conector", "Reparación vieja mal hecha"], siguiente_ok: "El cable está bien: revisá el componente o la alimentación.", siguiente_mal: "Ubicá el corte (mové el arnés midiendo) y reparalo. No cambies el sensor ni la computadora por esto." },
-    { id: "corto_tierra", nombre: "Corto a tierra", para: "cable", herramienta: "Multímetro en continuidad", energizado: false, aislar: AISLAR_RES.concat(["Sacá el fusible del circuito y desconectá el componente (si queda conectado, su propia resistencia puede confundir la lectura)."]),
+    { id: "corto_tierra", nombre: "Corto a tierra", para: "cable", herramienta: "Multímetro en continuidad y en ohmios", energizado: false,
+      aislar: AISLAR_RES.concat(["Sacá el fusible del circuito.", "Desconectá TODAS las cargas que alimenta ese fusible (según el diagrama) y apagá sus switches: un bombillo o un motor conectado mide pocos ohmios a tierra y parece un corto."]),
       donde: "Entre el cable del circuito (o el lado de salida del fusible) y tierra (metal limpio).", entrada: "continuidad", invertida: true, referencia: "fisica",
-      referencia_texto: "Criterio físico: con el componente desconectado NO debe haber continuidad a tierra. Si la hay, el cable toca metal en algún punto.",
+      referencia_texto: "Criterio físico: con TODAS las cargas del fusible desconectadas NO debe haber continuidad a tierra. Si la hay, el cable toca metal en algún punto. Si no sabés qué cargas comparte el fusible, el resultado es solo 'probable'.",
       causas_fuera: ["Cable pelado tocando la carrocería", "Arnés aplastado o rozado (bisagras, bordes)", "Componente en corto (si quedó conectado)"], siguiente_ok: "No hay corto en el cable: si el fusible se quema, revisá el componente (motor trabado, consumo alto).", siguiente_mal: "Mové el arnés por tramos mientras medís para encontrar el punto del corto." },
     { id: "resistencia_componente", nombre: "Resistencia de un sensor, actuador o resistencia", para: "componente", herramienta: "Multímetro en ohmios (y termómetro si es un sensor de temperatura)", energizado: false, aislar: AISLAR_RES.concat(["Desconectá el conector del componente y medí en los terminales del COMPONENTE."]),
       donde: "Entre los terminales del componente que indique el manual.", entrada: "numero", unidad: "Ω", referencia: "fabricante",
       referencia_texto: "Hace falta el valor del manual de servicio para ese componente (y la temperatura para sensores de temperatura).",
       causas_fuera: ["Componente dañado (abierto, en corto o fuera de valor)", "Medición en terminales equivocados", "Temperatura distinta a la del valor del manual"], siguiente_ok: "El componente mide bien: revisá alimentación, tierra y cables.", siguiente_mal: "Antes de cambiarlo, confirmá que mediste los terminales correctos y a la temperatura indicada; revisá también su alimentación y tierra." },
-    { id: "alimentacion_componente", nombre: "Alimentación de un componente o sensor", para: "componente", herramienta: "Multímetro en voltios DC", energizado: true, aislar: ["Es VOLTAJE: llave en ON. Medí por detrás del conector (sin perforar cables) o con el conector desconectado del lado del arnés."],
-      donde: "Entre el terminal de alimentación (o de referencia) del conector y tierra.", entrada: "numero", unidad: "V", referencia: "fabricante", fisica_cero: true,
+    { id: "alimentacion_componente", nombre: "Alimentación de un componente o sensor", para: "componente", herramienta: "Multímetro en voltios DC", energizado: true, aislar: ["Es VOLTAJE: llave en ON. Mejor por detrás del conector CONECTADO y con el circuito funcionando (sin perforar cables): desconectado, un cable con resistencia de más igual marca el voltaje completo.",
+        "Algunos circuitos solo tienen voltaje unos segundos o en ciertas condiciones (por ejemplo, la bomba al poner la llave): 0 V fuera de ese momento puede ser normal."],
+      donde: "Entre el terminal de alimentación (o de referencia) del conector y una buena tierra (el borne negativo).", entrada: "numero", unidad: "V", referencia: "fabricante", fisica_cero: true,
       referencia_texto: "El valor correcto (por ejemplo, una referencia de 5 V o voltaje de batería) depende del fabricante y del componente. Criterio físico: 0 V = no llega alimentación.",
       causas_fuera: ["Fusible o relé del circuito", "Cable de alimentación abierto", "Referencia en corto por otro sensor que la comparte", "Computadora sin alimentación"], siguiente_ok: "Llega alimentación: revisá la tierra y la señal.", siguiente_mal: "Revisá fusible, relé y el cable de alimentación. No cambies el componente." },
     { id: "tierra_componente", nombre: "Tierra de un componente (caída de voltaje)", para: "conexion", herramienta: "Multímetro en voltios DC", energizado: true, aislar: ["Es VOLTAJE con el circuito funcionando."],
       donde: "Punta roja en el terminal de tierra del componente; punta negra en el borne negativo de la batería.", entrada: "numero", unidad: "V", referencia: "fabricante", fisica_abierta: true,
-      referencia_texto: "Debe ser muy baja; el límite exacto depende del fabricante. Criterio físico: si se acerca al voltaje de batería, la tierra está abierta.",
+      referencia_texto: "Debe ser muy baja; el límite exacto depende del fabricante. Criterio físico: si se acerca al voltaje que alimenta ese circuito (batería, o la referencia de ~5 V en sensores), la tierra está abierta.",
       causas_fuera: ["Punto de tierra flojo, oxidado o pintado", "Cable de tierra dañado"], siguiente_ok: "La tierra está bien.", siguiente_mal: "Limpiá y apretá el punto de tierra; repetí la medición." },
     { id: "caida_positivo", nombre: "Caída de voltaje en el positivo", para: "conexion", herramienta: "Multímetro en voltios DC (y un ayudante si es el arranque)", energizado: true, aislar: ["Es VOLTAJE con el circuito funcionando (por ejemplo, mientras el ayudante da arranque). Manos lejos de piezas que giran."],
       donde: "Entre el borne positivo de la batería (el poste) y el terminal positivo del componente (por ejemplo, el terminal grueso del motor de arranque o la salida del alternador).", entrada: "numero", unidad: "V", referencia: "guia",
-      guia: { arranque: 0.5, carga: 0.5 }, referencia_texto: "Valor del fabricante si existe. Si no, guía general de taller (orientativa, no del fabricante): menos de ~0.5 V en el cable positivo del arranque o de la carga.",
+      guia: { arranque: 0.5, carga: 0.5 }, referencia_texto: "Valor del fabricante si existe. Si no, guía general de taller (orientativa, no del fabricante; varía entre guías, de ~0.2 a 0.5 V): menos de ~0.5 V en el cable positivo del arranque o de la carga.",
       causas_fuera: ["Borne o terminal sulfatado o flojo", "Cable dañado por dentro"], siguiente_ok: "El cable positivo está bien.", siguiente_mal: "Limpiá/apretá bornes y terminales; si sigue alta, cambiá el cable." },
     { id: "caida_tierra", nombre: "Caída de voltaje en la tierra", para: "conexion", herramienta: "Multímetro en voltios DC (y un ayudante si es el arranque)", energizado: true, aislar: ["Es VOLTAJE con el circuito funcionando. Manos lejos de piezas que giran."],
       donde: "Entre el borne negativo de la batería (el poste) y el bloque del motor o el punto de tierra del componente.", entrada: "numero", unidad: "V", referencia: "guia",
-      guia: { arranque: 0.3, carga: 0.3 }, referencia_texto: "Valor del fabricante si existe. Si no, guía general de taller (orientativa): menos de ~0.3 V en la tierra del arranque o de la carga.",
+      guia: { arranque: 0.3, carga: 0.3 }, referencia_texto: "Valor del fabricante si existe. Si no, guía general de taller (orientativa, varía entre guías): menos de ~0.3 V en la tierra del arranque o de la carga.",
       causas_fuera: ["Cable de tierra del motor o de la carrocería flojo/oxidado", "Correa de tierra rota"], siguiente_ok: "La tierra está bien.", siguiente_mal: "Limpiá y apretá la tierra; repetí la medición." },
     { id: "conector", nombre: "Inspección de conector y prueba de movimiento", para: "conexion", herramienta: "Vista, linterna y el escáner en 'En vivo'", energizado: true, aislar: ["La inspección se hace desconectado; la prueba de movimiento, con el motor en ralentí mirando el dato en vivo (manos lejos de piezas que giran)."],
       donde: "En el conector del componente sospechoso.", entrada: "conector", referencia: "fisica",
       referencia_texto: "Criterio físico: sin sulfato, pines firmes y rectos, sello sano; el dato en vivo no debe saltar al mover el conector y los cables.",
       causas_fuera: ["Sulfato (polvo verde o blanco)", "Pines abiertos o flojos", "Cable quebrado cerca del conector"], siguiente_ok: "El conector está bien.", siguiente_mal: "Limpiá con limpiador de contactos, ajustá o cambiá los terminales. No cambies el sensor todavía." },
     { id: "consumo_parasito", nombre: "Consumo con el carro apagado (fuga de corriente)", para: "bateria", herramienta: "Multímetro en amperios (escala de 10 A) en serie con el borne negativo", energizado: true,
-      aislar: ["Carro apagado, puertas cerradas (traba el switch de la puerta), sin llave. El multímetro va EN SERIE entre el borne negativo y su cable.", "Esperá a que los módulos 'se duerman' (el tiempo depende del carro).", "Nunca des arranque ni enciendas luces con el multímetro en serie: se quema su fusible interno."],
-      donde: "Entre el borne negativo de la batería y el cable negativo desconectado.", entrada: "numero", unidad: "mA", referencia: "fabricante",
+      aislar: ["Carro apagado, puertas cerradas (traba el switch de la puerta), sin llave. El multímetro va EN SERIE entre el borne negativo y su cable.",
+        "Soltar el borne despierta los módulos y el radio Honda puede pedir su código: anotalo antes. Esperá a que los módulos 'se duerman' (el tiempo depende del carro).",
+        "Empezá en la escala de 10 A. Cambiar de escala abre el circuito un instante y puede despertar los módulos otra vez.",
+        "Nunca des arranque ni enciendas luces con el multímetro en serie: se quema su fusible interno."],
+      donde: "Entre el borne negativo de la batería y el cable negativo desconectado.", entrada: "numero", unidad: "mA", unidades: ["mA", "A"], referencia: "fabricante",
       referencia_texto: "El consumo aceptable lo define el fabricante. Si es alto, sacá los fusibles uno por uno mirando el amperímetro: el que lo hace bajar señala el circuito.",
       causas_fuera: ["Luz que queda encendida (guantera, maletero)", "Radio o accesorio mal instalado", "Relé pegado", "Alternador con diodo en fuga"], siguiente_ok: "No hay consumo anormal: si la batería se descarga, revisá la batería y la carga.", siguiente_mal: "Sacá fusibles uno por uno para encontrar el circuito." },
     { id: "rele_intercambio", nombre: "Relé: intercambio con uno idéntico", para: "rele", herramienta: "Otro relé con el MISMO número de parte", energizado: false, aislar: ["Llave en LOCK para sacar y poner relés."],
@@ -5873,13 +5968,63 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     { id: "rele_bobina", nombre: "Resistencia de la bobina de un relé", para: "rele", herramienta: "Multímetro en ohmios", energizado: false, aislar: ["Sacá el relé de la caja."],
       donde: "Entre los terminales de la bobina del relé (según el diagrama impreso en el relé o el manual).", entrada: "numero", unidad: "Ω", referencia: "fabricante",
       referencia_texto: "El valor depende del relé: hace falta su especificación. Abierto (OL) = bobina cortada (criterio físico).", fisica_abierto: true,
-      causas_fuera: ["Bobina abierta o en corto"], siguiente_ok: "La bobina mide bien; los contactos se prueban aplicando 12 V a la bobina con un cable con fusible (o el intercambio).", siguiente_mal: "Cambiá el relé." },
+      causas_fuera: ["Bobina abierta o en corto"], siguiente_ok: "La bobina mide bien. Los contactos se prueban con el intercambio. La prueba de banco (12 V a la bobina) solo con el diagrama del relé y un cable con fusible: si el relé tiene diodo, invertir la polaridad lo pone en corto.", siguiente_mal: "Cambiá el relé." },
     { id: "voltaje_bornes", nombre: "Voltaje en los bornes de la batería", para: "bateria", herramienta: "Multímetro en voltios DC", energizado: true, aislar: ["Es VOLTAJE: no hace falta desconectar nada."],
       donde: "Directo en los postes de plomo de la batería (no en las abrazaderas).", entrada: "numero", unidad: "V", referencia: "guia", condiciones: ["reposo", "ralenti", "2000_cargas"],
       referencia_texto: "Reposo (1 h o más sin uso, ~25 °C), referencia general de baterías de plomo-ácido: ~12.6 V cargada, ~12.4 V media, menos de 12.2 V descargada. Con el motor encendido: el valor de carga del fabricante (si lo anotaste en 'Datos del manual'); como guía general, 13.5–14.7 V. Algunos Honda con detector de carga (ELD) cargan menos a propósito.",
       causas_fuera: ["Batería descargada o vieja", "Alternador, regulador, faja o conexiones"], siguiente_ok: "Voltaje normal en esa condición.", siguiente_mal: "Seguí con la evaluación de batería y carga." },
   ];
   S.pruebaCircuito = (id) => S.PRUEBAS_CIRCUITO.find((p) => p.id === id) || null;
+
+  /**
+   * Rangos FÍSICOS posibles de cada medición en un carro de 12 V (no son especificaciones: sirven para detectar
+   * mediciones imposibles, escala equivocada o puntas invertidas).
+   */
+  const RANGO_FISICO = { V: [-0.3, 20], "Ω": [0, Infinity], mA: [0, 10000] };
+  S.validarMedicion = function (m) {
+    const p = S.pruebaCircuito(m && m.prueba);
+    if (!p) return { ok: false, texto: "Prueba desconocida." };
+    const mal = (texto) => ({ ok: false, texto });
+    const num = (x) => (x == null || x === "" ? null : Number(x));
+    if (p.entrada === "voltaje_fusible") {
+      for (const [k, n] of [["entrada", "lado 1"], ["salida", "lado 2"], ["bateria", "batería"]]) {
+        const v = num(m[k]);
+        if (v == null) continue;
+        if (isNaN(v) || v < -0.3) return mal(`Voltaje negativo en ${n}: puntas invertidas o medición imposible. Repetila (punta negra a tierra).`);
+        if (v > 20) return mal(`${v} V en ${n} es imposible en un carro de 12 V: revisá la escala del multímetro.`);
+      }
+      const vb = num(m.bateria);
+      if (vb != null && (num(m.entrada) > vb + 1 || num(m.salida) > vb + 1)) return mal("Un lado del fusible marca más que la batería: medición inconsistente. Repetila.");
+      return { ok: true };
+    }
+    if (p.entrada === "continuidad") {
+      const v = norm(m.valor), ohm = m.ohm != null && String(m.ohm).trim().toUpperCase() === "OL" ? Infinity : num(m.ohm);
+      if (ohm != null && isNaN(ohm)) return mal("El valor en ohmios no es un número (ni OL).");
+      if (ohm != null && ohm < 0) return mal("Resistencia negativa: medición imposible. Revisá las puntas y la escala.");
+      if (v === "si" && ohm != null && ohm >= 1000) return mal(`Marcaste continuidad pero mide ${ohm === Infinity ? "OL (abierto)" : ohm + " Ω"}: datos contradictorios. Repetí la medición.`);
+      if (v === "no" && ohm != null && ohm < 1) return mal(`Marcaste 'sin continuidad' pero mide ${ohm} Ω: datos contradictorios. Repetí la medición.`);
+      return { ok: true };
+    }
+    if (p.entrada !== "numero") return { ok: true };
+    let v = num(m.valor);
+    if (m.valor != null && String(m.valor).trim().toUpperCase() === "OL") return { ok: true };
+    if (v == null) return { ok: true };
+    if (isNaN(v)) return mal("El valor no es un número.");
+    if (p.id === "consumo_parasito" && m.unidad_consumo === "A") v *= 1000;
+    const r = RANGO_FISICO[p.unidad];
+    if (r && (v < r[0] || v > r[1])) {
+      if (p.unidad === "V" && v < r[0]) return mal("Voltaje negativo: puntas invertidas. Repetí la medición con la punta roja en el lado positivo.");
+      if (p.unidad === "Ω") return mal("Resistencia negativa: medición imposible. Revisá las puntas y la escala.");
+      if (p.unidad === "mA") return mal("Más de 10 A con el carro apagado es imposible de medir así (el multímetro no lo soporta): revisá la escala y la unidad.");
+      return mal(`${v} ${p.unidad} es imposible en un carro de 12 V: revisá la escala del multímetro.`);
+    }
+    if (p.id === "voltaje_bornes") {
+      if (m.condicion === "reposo" && v > 13.2) return mal(`${v} V no es un voltaje de reposo: el motor estaba encendido, el carro se acababa de usar (carga superficial) o la condición está mal elegida. Repetí con 1 h o más sin uso.`);
+      if (v < 3) return mal(`${v} V en los bornes de una batería de 12 V: revisá la escala del multímetro o que estés midiendo en los postes.`);
+    }
+    if ((p.id === "caida_positivo" || p.id === "caida_tierra") && num(m.bateria) != null && v > num(m.bateria)) return mal("La caída no puede ser mayor que el voltaje de la batería: revisá dónde pusiste las puntas.");
+    return { ok: true };
+  };
 
   /** Valor de referencia para una medición: del dueño (manual de su carro) o de la ficha. Nunca inventado. */
   S.especificacionPara = function ({ variante, carro, prueba, componente, condicion }) {
@@ -5902,14 +6047,21 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
   S.evaluarMedicion = function (m, spec) {
     const p = S.pruebaCircuito(m && m.prueba);
     if (!p) return { veredicto: "incompleto", texto: "Prueba desconocida." };
+    const val0 = S.validarMedicion(m);
+    if (!val0.ok) return { veredicto: "invalida", nivel: "no_verificable", texto: val0.texto, causas: [], siguiente: "Repetí la medición.", referencia: p.referencia_texto };
     const base = { referencia: spec ? `${spec.fuente || "Especificación"}${spec.min != null || spec.max != null ? `: ${spec.min ?? "—"} a ${spec.max ?? "—"} ${spec.unidad || p.unidad || ""}` : spec.valor != null ? `: ${spec.valor} ${spec.unidad || p.unidad || ""}` : ""}` : p.referencia_texto };
-    const res = (veredicto, texto, malo) => ({ ...base, veredicto, texto, causas: malo ? p.causas_fuera : [], siguiente: malo ? p.siguiente_mal : veredicto === "sin_referencia" ? "Buscá el valor en el manual de servicio de tu carro y anotalo para poder comparar." : p.siguiente_ok });
+    const NIV = { dentro: "confirmado", fuera: "confirmado", sin_referencia: "requiere_documentacion", orientativo_ok: "probable", orientativo_alto: "probable", incompleto: "requiere_medicion" };
+    const res = (veredicto, texto, malo) => ({ ...base, veredicto, nivel: NIV[veredicto] || "requiere_medicion", texto, causas: malo ? p.causas_fuera : [], siguiente: malo ? p.siguiente_mal : veredicto === "sin_referencia" ? "Buscá el valor en el manual de servicio de tu carro y anotalo para poder comparar." : p.siguiente_ok });
 
     if (p.entrada === "continuidad") {
       const v = norm(m.valor);
       if (!["si", "no", "dudoso"].includes(v)) return res("incompleto", "Anotá si hay continuidad (sí / no / dudoso).");
       if (v === "dudoso") return res("fuera", "Lectura dudosa: hay continuidad pero con resistencia de más. Hacé una caída de voltaje con el circuito funcionando.", true);
       const bien = p.invertida ? v === "no" : v === "si";
+      if (p.id === "corto_tierra" && !bien && m.cargas_desconectadas !== true) {
+        return { ...base, veredicto: "probable", nivel: "probable", texto: `Hay continuidad a tierra${m.ohm != null ? ` (${m.ohm} Ω)` : ""}, pero no confirmaste que TODAS las cargas de ese fusible estén desconectadas: puede ser un bombillo o un motor, no un corto.`,
+          causas: p.causas_fuera, siguiente: "Con el diagrama, desconectá todas las cargas de ese fusible y repetí. Si no tenés el diagrama, el resultado no se puede confirmar." };
+      }
       const txt = { fusible_continuidad: bien ? "El fusible tiene continuidad: está bien." : "El fusible está abierto: quemado.",
         continuidad_cable: bien ? "El cable tiene continuidad." : "El cable está abierto (sin continuidad).",
         corto_tierra: bien ? "No hay continuidad a tierra: no hay corto en ese tramo." : "Hay continuidad a tierra con el componente desconectado: corto a tierra." }[p.id];
@@ -5933,12 +6085,16 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       return res("incompleto", "Anotá si el síntoma mejoró o quedó igual con el otro relé.");
     }
     // Números
-    const val = Number(m.valor);
-    if (m.valor == null || m.valor === "" || isNaN(val)) return res("incompleto", "Anotá el valor medido.");
+    const esOL = m.valor != null && String(m.valor).trim().toUpperCase() === "OL";
+    let val = esOL ? Infinity : Number(m.valor);
+    if (!esOL && (m.valor == null || m.valor === "" || isNaN(val))) return res("incompleto", "Anotá el valor medido.");
+    if (p.id === "consumo_parasito" && m.unidad_consumo === "A") val *= 1000;
     const vb = Number(m.bateria) > 6 ? Number(m.bateria) : null;
+    const vCirc = Number(m.voltaje_circuito) > 0 ? Number(m.voltaje_circuito) : vb;
     if (p.fisica_abierto && val >= 1e6) return res("fuera", "Abierto (OL): la bobina está cortada.", true);
-    if (p.fisica_cero && val < 0.5) return res("fuera", "Prácticamente 0 V: no llega alimentación (criterio físico).", true);
-    if (p.fisica_abierta && vb && val >= 0.8 * vb) return res("fuera", "La caída en la tierra es casi el voltaje de batería: la tierra está abierta (criterio físico).", true);
+    if (esOL && p.unidad === "Ω") return res("fuera", "Abierto (OL): no hay continuidad a través del componente.", true);
+    if (p.fisica_cero && val < 0.5) return res("fuera", "Prácticamente 0 V: no llega alimentación EN ESE MOMENTO (criterio físico). Confirmá que el circuito debía estar activo (llave en ON, switch encendido).", true);
+    if (p.fisica_abierta && vCirc && val >= 0.8 * vCirc) return res("fuera", `La caída en la tierra es casi el voltaje del circuito (${r2(vCirc)} V): la tierra está abierta (criterio físico).`, true);
     if (spec) {
       const lo = spec.min != null ? spec.min : spec.valor != null && spec.tolerancia != null ? spec.valor - spec.tolerancia : null;
       const hi = spec.max != null ? spec.max : spec.valor != null && spec.tolerancia != null ? spec.valor + spec.tolerancia : null;
@@ -6138,6 +6294,7 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
     const out = (id, texto, certeza, siguiente, no_cambiar) => ({ id, texto, certeza, descartado, pendiente, siguiente, no_cambiar: no_cambiar || "" });
     if (med.conector === "mal") return out("conector", `Conector de ${d.nombre} con daño o falso contacto.`, "confirmada", "Limpiá o repará los terminales y repetí la lectura.", "El componente: primero repará el conector.");
     if (med.conector === "bien") descartado.push("Conector (inspección)");
+    else pendiente.push("Revisar el conector del componente (sulfato, pines flojos): una mala conexión cambia la resistencia y la señal");
     // Alimentación
     if (usaAlim) {
       if (med.alimentacion == null) pendiente.push("Alimentación/referencia en el conector (llave en ON)");
@@ -6163,14 +6320,16 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       else {
         const s = med.resistencia_spec, dentro = (s.min == null || med.resistencia >= s.min) && (s.max == null || med.resistencia <= s.max);
         if (!dentro) {
-          const todoVerificado = (!usaAlim || med.alimentacion != null) && med.tierra != null;
-          return out("componente", `${d.nombre}: resistencia fuera de especificación (${r2(med.resistencia)} Ω; ${s.fuente || "manual"}).`, todoVerificado ? "confirmada" : "sospecha",
-            todoVerificado ? "Cambiá el componente (alimentación y tierra ya verificadas)." : "Antes de cambiarlo, verificá alimentación y tierra (pendientes).", todoVerificado ? "" : "Todavía no: faltan verificar alimentación y tierra.");
+          const faltan = [usaAlim && med.alimentacion == null ? "alimentación" : null, med.tierra == null ? "tierra" : null, med.conector !== "bien" ? "conector" : null].filter(Boolean);
+          const verificado = [usaAlim ? "alimentación" : null, "tierra", "conector"].filter(Boolean).join(", ");
+          return out("componente", `${d.nombre}: resistencia fuera de especificación (${r2(med.resistencia)} Ω; ${s.fuente || "manual"}).`, faltan.length ? "sospecha" : "confirmada",
+            faltan.length ? `Antes de cambiarlo, verificá: ${faltan.join(", ")}.` : `Cambiá el componente (${verificado} ya verificados).`, faltan.length ? `Todavía no: falta verificar ${faltan.join(", ")}.` : "");
         }
         descartado.push(`Componente (resistencia dentro de especificación: ${r2(med.resistencia)} Ω)`);
       }
     } else if (d.circuitos.includes("senal") || d.circuitos.includes("control")) pendiente.push("Resistencia del componente desconectado (con el valor del manual)");
-    if (med.senal_ok === false && !pendiente.length) return out("computadora", `Alimentación, tierra, cables y componente verificados, pero la señal sigue mal: posible problema en la computadora o en un dato de especificación.`, "sospecha", "Confirmá con el manual de servicio antes de condenar la computadora (es lo último).", "La computadora sin una prueba del taller.");
+    if (med.senal_ok === false && !pendiente.length && med.conector === "bien" && med.corto_tierra === "no") return out("computadora", `Alimentación, tierra, cables y componente verificados, pero la señal sigue mal: posible problema en la computadora o en un dato de especificación.`, "sospecha", "Confirmá con el manual de servicio antes de condenar la computadora (es lo último).", "La computadora sin una prueba del taller.");
+    if (med.senal_ok === false && med.corto_tierra !== "no") pendiente.push("Corto a tierra del cable de señal (con todas las cargas desconectadas)");
     if (!pendiente.length) return out("sin_falla", `No se encontró falla eléctrica en ${d.nombre} con las mediciones hechas.`, "sospecha", "Si el código sigue, puede ser intermitente: prueba de movimiento con el dato en vivo.", "");
     return out("pendiente", `Faltan mediciones para separar la causa en ${d.nombre}.`, "posibilidad", pendiente[0], "El componente: todavía no hay pruebas suficientes.");
   };
@@ -6224,55 +6383,145 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
   S.REGLAS_EXTRA.push(reglaCausaComun);
   S.reglaCausaComun = reglaCausaComun;
 
+  // ================================================================== hipótesis por síntomas e inspección
+  /**
+   * Relaciona síntomas e inspección con causas comunes que el OBD no ve (relé principal, fusible principal o de encendido,
+   * cortos, falsos contactos, instalaciones agregadas). Todo queda como "sospechoso" hasta medir.
+   */
+  S.hipotesisElectricas = function ({ sintomas = [], variante = null, inspeccion = {}, evaluados = [] } = {}) {
+    const sint = new Set(sintomas || []), out = [];
+    const fus = (re) => (S.fusiblesDe ? S.fusiblesDe(variante) : []).filter((f) => re.test(norm(`${f.nombre} ${f.circuito}`)));
+    const lista = (fs) => fs.map((f) => `${f.id} (${f.amperaje ? f.amperaje + " A, " : ""}${f.nombre})`).join("; ");
+    const rele = (S.relesDe ? S.relesDe(variante) : []).find((r) => /pgm-fi|principal/i.test(r.nombre));
+    if (sint.has("arranca_no_enciende") || sint.has("se_apaga_marcha")) {
+      const f = fus(/bomba|bobina|ign coil|computadora|fi e\/m/);
+      out.push({ id: "hip_rele_principal", nivel: "sospechoso", urgencia: sint.has("se_apaga_marcha") ? "pronto" : "programar",
+        titulo: `Falta de alimentación a la computadora, la bomba o el encendido${rele ? ` (incluido el ${rele.nombre})` : " (relé principal)"}`,
+        evidencia: [sint.has("arranca_no_enciende") ? "Síntoma: da arranque pero no enciende" : null, sint.has("se_apaga_marcha") ? "Síntoma: se apaga de golpe en marcha" : null].filter(Boolean),
+        siguiente: `Durante la falla (no después), con la llave en ON: medí voltaje en ambos lados de ${f.length ? lista(f) : "los fusibles de la computadora, la bomba y el encendido"}. Si los fusibles tienen voltaje, falta medir la salida del relé principal: eso requiere sus terminales (manual de servicio).`,
+        falta: rele && !rele.terminales ? `Terminales y prueba del ${rele.nombre} (no documentados)` : null,
+        nota: rele && (rele.fuentes || []).includes("go_parts_crv") ? "Publicaciones secundarias lo señalan como sospechoso en este modelo, sobre todo en caliente; no es un dato del fabricante." : "" });
+    }
+    if (sint.has("varios_sistemas") || (sint.has("no_da_arranque") && sint.has("varios_sistemas"))) {
+      const pr = (S.fusiblesDe ? S.fusiblesDe(variante) : []).filter((f) => f.principal);
+      out.push({ id: "hip_alimentacion_general", nivel: "sospechoso", urgencia: "pronto",
+        titulo: "Causa común de alimentación: fusible principal o de encendido, switch de encendido, borne o tierra principal",
+        evidencia: ["Síntoma: varios sistemas eléctricos fallan a la vez", sint.has("no_da_arranque") ? "Síntoma: no da arranque" : null].filter(Boolean),
+        siguiente: `Voltaje en los bornes; voltaje en ambos lados de ${pr.length ? lista(pr) : "los fusibles principales"} con la llave en ON; caída de voltaje en la tierra principal.` });
+    }
+    const seQuema = evaluados.filter((x) => x.e && x.e.se_quema);
+    if (sint.has("fusible_se_quema") || seQuema.length) out.push({ id: "hip_corto", nivel: "sospechoso", urgencia: "pronto",
+      titulo: "Corto a tierra o consumo excesivo en el circuito del fusible que se quema",
+      evidencia: [sint.has("fusible_se_quema") ? "Síntoma: un fusible se vuelve a quemar" : null, ...seQuema.map((x) => `${x.id} se ha quemado ${x.insp.veces_quemado} veces`)].filter(Boolean),
+      siguiente: "Prueba 'Corto a tierra' con el fusible fuera y TODAS sus cargas desconectadas. Nunca pongas un fusible más grande." });
+    if (sint.has("olor_quemado")) out.push({ id: "hip_sobrecalentamiento", nivel: "sospechoso", urgencia: "detener",
+      titulo: "Olor a cable quemado: posible cable o conector recalentado",
+      evidencia: ["Síntoma: olor a cable quemado"],
+      siguiente: "No sigas usando el carro. Si hay humo o llamas, alejate y pedí ayuda. Sin humo: con el carro apagado, buscá plástico derretido en cajas, conectores y arneses; que lo revise un electricista antes de usarlo." });
+    if (sint.has("falla_intermitente")) out.push({ id: "hip_falso_contacto", nivel: "sospechoso", urgencia: "programar",
+      titulo: "Falso contacto: conector, tierra, fusible flojo o relé",
+      evidencia: ["Síntoma: algo eléctrico funciona y deja de funcionar"],
+      siguiente: "Prueba de movimiento (mové conectores y arneses mirando el síntoma o el dato en vivo) y caída de voltaje con el circuito funcionando." });
+    // Instalaciones agregadas o modificadas
+    const evMod = [];
+    for (const x of evaluados) {
+      if (x.doc && x.doc.libre && !x.doc.opcional && x.insp && (x.insp.estado === "bien" || x.insp.estado === "quemado")) evMod.push(`Hay un fusible en ${x.id}, documentada como 'no usada'`);
+      if (x.doc && x.doc.amperaje && x.insp && Number(x.insp.amperaje_obs) > x.doc.amperaje) evMod.push(`${x.id} tiene ${x.insp.amperaje_obs} A (documentado ${x.doc.amperaje} A)`);
+      if (x.insp && /empalme|agregad|alarma|radio nuevo|cable extra|fusible en l[ií]nea/i.test(x.insp.notas || "")) evMod.push(`Nota en ${x.id}: ${x.insp.notas}`);
+    }
+    if (evMod.length) out.push({ id: "hip_modificacion", nivel: "sospechoso", urgencia: sint.has("bateria_se_descarga") ? "programar" : "vigilar",
+      titulo: "Circuito modificado o instalación agregada (alarma, radio, luces)",
+      evidencia: [...evMod, sint.has("bateria_se_descarga") ? "Síntoma: la batería amanece descargada" : null].filter(Boolean),
+      siguiente: "Buscá cables que no sean de fábrica (empalmes, cinta, fusibles en línea) y medí el consumo con el carro apagado sacando fusibles uno por uno." });
+    return out;
+  };
+
+  // ================================================================== contradicciones
+  /** Lo que dicen la inspección, las mediciones y las fotos sobre cada fusible; si se contradicen, no se concluye nada. */
+  S.contradiccionesFusibles = function (inspFusibles = {}, mediciones = []) {
+    const porFusible = {};
+    const anotar = (id, estado, origen) => { (porFusible[id] = porFusible[id] || []).push({ estado, origen }); };
+    for (const [id, i] of Object.entries(inspFusibles)) {
+      if (!i || !i.estado || !METODO_FISICO.includes(i.metodo)) continue;
+      if (i.estado === "bien") anotar(id, "bien", `inspección (${S.METODOS_INSPECCION[i.metodo]})`);
+      if (i.estado === "quemado") anotar(id, "abierto", `inspección (${S.METODOS_INSPECCION[i.metodo]})`);
+    }
+    for (const m of mediciones) {
+      if (!m.componente) continue;
+      if (m.prueba === "fusible_continuidad") { const v = norm(m.valor); if (v === "si") anotar(m.componente, "bien", "medición de continuidad"); if (v === "no") anotar(m.componente, "abierto", "medición de continuidad"); }
+      if (m.prueba === "fusible_voltaje") { const r = S.evaluarVoltajeFusible(m).resultado; if (r === "bien") anotar(m.componente, "bien", "voltaje en ambos lados"); if (r === "abierto") anotar(m.componente, "abierto", "voltaje en ambos lados"); }
+    }
+    const out = [];
+    for (const [id, l] of Object.entries(porFusible)) {
+      const estados = new Set(l.map((x) => x.estado));
+      if (estados.size > 1) out.push({ id, texto: `${id}: los datos se contradicen (${l.map((x) => `${x.origen}: ${x.estado}`).join("; ")}). Repetí la medición antes de concluir.` });
+    }
+    return out;
+  };
+
   // ================================================================== diagnóstico eléctrico integrado
   /**
-   * ctx: { variante, inspeccion:{fusibles:{}, reles:{}}, mediciones:[], obd:{codigos:[{codigo,tipo}], resumen}, sintomas:[], pruebas:[], carro, componentes:{id: med} }
-   * Devuelve qué se sabe, qué se sospecha, qué no se puede determinar y qué prueba hace falta.
+   * ctx: { variante, inspeccion:{fusibles:{}, reles:{}}, mediciones:[], obd:{codigos:[{codigo,tipo}], resumen}, sintomas:[], pruebas:[], carro, componentes:{id: med}, conexion }
+   * Devuelve qué se sabe, qué se sospecha, qué no se puede determinar y qué prueba hace falta; cada elemento con su nivel de evidencia.
    */
   S.diagnosticoElectrico = function (ctx = {}) {
     const sabe = [], sospecha = [], no_determina = [], pruebas = [];
-    const add = (l, id, texto, extra = {}) => { if (!l.some((x) => x.id === id)) l.push({ id, texto, ...extra }); };
+    const NIV_DEF = new Map([[sabe, "confirmado"], [sospecha, "sospechoso"], [no_determina, "requiere_documentacion"], [pruebas, "requiere_medicion"]]);
+    const add = (l, id, texto, extra = {}) => { if (!l.some((x) => x.id === id)) l.push({ id, texto, nivel: NIV_DEF.get(l), ...extra }); };
     const variante = ctx.variante, insp = (ctx.inspeccion && ctx.inspeccion.fusibles) || {};
     const docs = S.fusiblesDe ? S.fusiblesDe(variante) : [];
     const docDe = (id) => docs.find((f) => f.id === id) || null;
+    const contradicciones = S.contradiccionesFusibles(insp, ctx.mediciones || []);
+    const contradictorio = new Set(contradicciones.map((c) => c.id));
+    for (const c of contradicciones) { add(no_determina, `contradiccion:${c.id}`, c.texto, { nivel: "no_verificable" }); add(pruebas, `repetir:${c.id}`, `Repetir la medición de ${c.id} (continuidad con el fusible fuera y voltaje en ambos lados).`); }
     const evaluados = [];
     for (const [id, i] of Object.entries(insp)) {
       const doc = docDe(id), e = S.evaluarFusible(doc, i);
       evaluados.push({ id, doc, insp: i, e });
+      if (contradictorio.has(id)) continue;
       const nombre = doc ? `${id} (${doc.nombre})` : id;
-      if (e.estado === "quemado") { add(sabe, `fusible_quemado:${id}`, `El fusible ${nombre} está abierto.`); add(no_determina, `por_que_quemo:${id}`, `Por qué se quemó ${nombre}: el fusible solo muestra el efecto.`); add(pruebas, `reemplazar:${id}`, `Reemplazar ${id} por uno del mismo amperaje${doc && doc.amperaje ? ` (${doc.amperaje} A)` : ""} y probar el circuito.`); }
-      if (e.estado === "quemado_probable") { add(sospecha, `fusible_quemado_probable:${id}`, `El fusible ${nombre} parece quemado (sin confirmar).`); add(pruebas, `confirmar_fusible:${id}`, `Confirmar ${id} con continuidad (fuera) o voltaje en ambos lados.`); }
-      if (e.estado === "ausente") { add(sabe, `fusible_ausente:${id}`, `Falta el fusible ${nombre}.`); add(no_determina, `por_que_falta:${id}`, `Si lo sacaron a propósito (por ejemplo, porque se quemaba).`); add(pruebas, `poner:${id}`, `Confirmar el amperaje con la tapa y poner el fusible ${id}.`); }
-      if (e.estado === "amperaje") { add(sabe, `amperaje_distinto:${id}`, `En ${nombre} hay ${i.amperaje_obs} A; la documentación dice ${doc && doc.amperaje} A.`);
+      if (e.estado === "quemado") { add(sabe, `fusible_quemado:${id}`, `El fusible ${nombre} está abierto.`); add(no_determina, `por_que_quemo:${id}`, `Por qué se quemó ${nombre}: el fusible solo muestra el efecto.`, { nivel: "requiere_medicion" }); add(pruebas, `reemplazar:${id}`, `Reemplazar ${id} por uno del mismo amperaje${doc && doc.amperaje ? ` (${doc.amperaje} A)` : ""} y probar el circuito.`); }
+      if (e.estado === "quemado_probable") { add(sospecha, `fusible_quemado_probable:${id}`, `El fusible ${nombre} parece quemado (sin confirmar).`, { nivel: "probable" }); add(pruebas, `confirmar_fusible:${id}`, `Confirmar ${id} con continuidad (fuera) o voltaje en ambos lados.`); }
+      if (e.estado === "ausente") { add(sabe, `fusible_ausente:${id}`, `Falta el fusible ${nombre}.`); add(no_determina, `por_que_falta:${id}`, `Si lo sacaron a propósito (por ejemplo, porque se quemaba).`, { nivel: "no_verificable" }); add(pruebas, `poner:${id}`, `Confirmar el amperaje con la tapa y poner el fusible ${id}.`); }
+      if (e.estado === "amperaje") {
+        add(sabe, `observado:${id}`, `En ${nombre} hay un fusible de ${i.amperaje_obs} A (lo anotaste vos).`);
+        add(e.nivel === "confirmado" ? sabe : sospecha, `amperaje_distinto:${id}`, `${id}: ${i.amperaje_obs} A donde la documentación (${(S.VERIFICACION[e.verificacion] || {}).nombre || e.verificacion}) dice ${doc && doc.amperaje} A.`, { nivel: e.nivel });
         if (e.verificacion !== "dueno" && e.verificacion !== "oem") add(no_determina, `doc_aplica:${id}`, `Si la documentación de ${id} corresponde a tu variante (no está confirmada con la tapa).`);
         if (Number(i.amperaje_obs) > (doc && doc.amperaje)) add(sospecha, `falla_tapada:${id}`, `Alguien pudo poner un fusible más grande porque el original se quemaba: posible falla en ${doc ? doc.circuito : "ese circuito"}.`);
-        add(pruebas, `amperaje_correcto:${id}`, `Confirmar con la tapa y poner el amperaje documentado en ${id} (nunca uno más grande).`); }
+        add(pruebas, `amperaje_correcto:${id}`, `Confirmar con la tapa y poner el amperaje documentado en ${id} (nunca uno más grande).`);
+      }
       if (e.estado === "desconocida") add(no_determina, `config:${id}`, `${PEND()} (${nombre}).`);
-      if (e.estado === "contacto") { add(sospecha, `falso_contacto:${id}`, `Posible falso contacto en la posición ${id}.`); add(pruebas, `caida_fusible:${id}`, `Medir la caída de voltaje a través de ${id} con el circuito funcionando.`); }
-      if (e.se_quema) { add(sabe, `se_quema:${id}`, `${nombre} se ha quemado ${i.veces_quemado} veces.`); add(sospecha, `corto:${id}`, `Corto a tierra o consumo excesivo en ${doc ? doc.circuito : "ese circuito"}.`); add(pruebas, `corto_tierra:${id}`, `Prueba 'Corto a tierra' en el circuito de ${id} con el fusible fuera y el componente desconectado.`); }
+      if (e.estado === "contacto") { add(sospecha, `falso_contacto:${id}`, `Posible falso contacto en la posición ${id}.`, { nivel: "probable" }); add(pruebas, `caida_fusible:${id}`, `Medir la caída de voltaje a través de ${id} con el circuito funcionando.`); }
+      if (e.se_quema) { add(sabe, `se_quema:${id}`, `${nombre} se ha quemado ${i.veces_quemado} veces.`); add(sospecha, `corto:${id}`, `Corto a tierra o consumo excesivo en ${doc ? doc.circuito : "ese circuito"}.`); add(pruebas, `corto_tierra:${id}`, `Prueba 'Corto a tierra' en el circuito de ${id} con el fusible fuera y TODAS sus cargas desconectadas.`); }
+      if (i.amperaje_foto != null && i.amperaje_obs == null && doc && doc.amperaje && Number(i.amperaje_foto) !== doc.amperaje) add(sospecha, `foto_amperaje:${id}`, `La foto sugiere ${i.amperaje_foto} A en ${id} (documentado ${doc.amperaje} A): sin confirmar.`, { nivel: "probable" });
     }
-    for (const x of S.detectarIntercambios(variante, insp)) add(sospecha, `intercambio:${x.a}:${x.b}`, x.texto);
+    for (const x of S.detectarIntercambios(variante, insp)) add(sospecha, `intercambio:${x.a}:${x.b}`, x.texto, { nivel: "probable" });
     // Relés
     for (const [id, r] of Object.entries((ctx.inspeccion && ctx.inspeccion.reles) || {})) {
       const rel = (S.relesDe ? S.relesDe(variante) : []).find((x) => x.id === id);
       const nombre = rel ? rel.nombre : id;
+      const rdoc = ((ctx.inspeccion && ctx.inspeccion.reles_doc) || {})[id] || {};
       if (r.resultado === "mejora") { add(sabe, `rele_falla:${id}`, `${nombre}: con un relé idéntico el sistema funciona; el original falla.`); add(pruebas, `cambiar_rele:${id}`, `Cambiar ${nombre} por uno del mismo número de parte.`); }
       if (r.resultado === "igual") add(sabe, `rele_ok:${id}`, `${nombre}: con un relé idéntico sigue igual; el relé no parece la causa.`);
-      if (rel && !rel.posicion) add(no_determina, `rele_pos:${id}`, `La posición exacta de ${nombre} en la caja (no está documentada).`);
+      if (rel && !rel.posicion && !rdoc.ubicacion_dueno) add(no_determina, `rele_pos:${id}`, `La posición exacta de ${nombre} (no está documentada).`);
+      if (rel && !rel.terminales && !(rdoc.terminales && rdoc.terminales.length && rdoc.fuente)) add(no_determina, `rele_term:${id}`, `Los terminales y valores de ${nombre} (requieren el manual de servicio).`);
     }
     // Mediciones
     for (const m of ctx.mediciones || []) {
       const p = S.pruebaCircuito(m.prueba);
       if (!p) continue;
+      if (m.componente && contradictorio.has(m.componente)) continue;
       const e = S.evaluarMedicion(m, m.spec || S.especificacionPara({ variante, carro: ctx.carro, prueba: m.prueba, componente: m.componente, condicion: m.condicion }));
       const donde = m.componente ? ` (${m.componente})` : "";
+      if (e.veredicto === "invalida") { add(no_determina, `medicion_invalida:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${e.texto}`, { nivel: "no_verificable" }); add(pruebas, `repetir_med:${m.prueba}:${m.componente || ""}`, `Repetir '${p.nombre}'${donde}.`); continue; }
+      if (e.veredicto === "probable") { add(sospecha, `medicion_probable:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${e.texto}`, { nivel: "probable" }); add(pruebas, `cargas:${m.componente || ""}`, e.siguiente); add(no_determina, `cargas_fusible:${m.componente || ""}`, `Qué cargas comparte ese fusible (requiere el diagrama).`); continue; }
       if (e.veredicto === "fuera") {
         add(sabe, `medicion_fuera:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${e.texto}`);
         if (p.id === "alimentacion_componente") add(sospecha, `alim:${m.componente}`, `Falta alimentación en ${m.componente}: fusible, relé, cable o referencia compartida.`);
         if (p.id === "corto_tierra") add(pruebas, `ubicar_corto:${m.componente || ""}`, "Mover el arnés por tramos midiendo para ubicar el corto.");
         if (p.id === "continuidad_cable") add(pruebas, `reparar_cable:${m.componente || ""}`, "Ubicar y reparar el cable abierto; no cambiar el componente por esto.");
       } else if (e.veredicto === "dentro") add(sabe, `medicion_ok:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${e.texto}`);
-      else if (e.veredicto === "orientativo_alto") { add(sospecha, `medicion_guia:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${e.texto}`); add(no_determina, `sin_spec:${m.prueba}`, `El límite exacto del fabricante para '${p.nombre}' (se usó una guía general).`); }
+      else if (e.veredicto === "orientativo_alto") { add(sospecha, `medicion_guia:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${e.texto}`, { nivel: "probable" }); add(no_determina, `sin_spec:${m.prueba}`, `El límite exacto del fabricante para '${p.nombre}' (se usó una guía general).`); }
       else if (e.veredicto === "sin_referencia") { add(no_determina, `sin_spec:${m.prueba}:${m.componente || ""}`, `${p.nombre}${donde}: ${SIN_REF()}.`); }
     }
     // Componentes (sensor / actuador)
@@ -6280,9 +6529,9 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       const r = S.diferenciarFalla(comp, med);
       const nombre = (S.COMPONENTES_ELECTRICOS[comp] || {}).nombre || comp;
       if (r.certeza === "confirmada") add(sabe, `componente:${comp}:${r.id}`, r.texto); else if (r.id !== "pendiente" && r.id !== "sin_falla") add(sospecha, `componente:${comp}:${r.id}`, r.texto);
-      if (r.pendiente.length) add(no_determina, `componente_pend:${comp}`, `${nombre}: falta ${r.pendiente.join("; ")}.`);
+      if (r.pendiente.length) add(no_determina, `componente_pend:${comp}`, `${nombre}: falta ${r.pendiente.join("; ")}.`, { nivel: "requiere_medicion" });
       if (r.siguiente) add(pruebas, `componente_sig:${comp}`, r.siguiente);
-      if (r.no_cambiar) add(no_determina, `no_cambiar:${comp}`, `No cambiar todavía: ${r.no_cambiar}`);
+      if (r.no_cambiar) add(no_determina, `no_cambiar:${comp}`, `No cambiar todavía: ${r.no_cambiar}`, { nivel: "requiere_medicion" });
     }
     // Códigos OBD
     const codigos = ((ctx.obd && ctx.obd.codigos) || []).map((c) => ({ ...S.clasificarCodigoElectrico(c.codigo || c), tipo: c.tipo }));
@@ -6292,25 +6541,32 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       const fus = variante ? S.fusiblesParaCodigo(variante, c.codigo) : [];
       if (fus.length) add(pruebas, `fusible_codigo:${c.codigo}`, `Revisar ${fus.map((f) => `${f.id} (${f.nombre})`).join(", ")}: relación posible por el nombre del circuito, no confirmada.`);
       else add(no_determina, `fusible_codigo:${c.codigo}`, `Qué fusible alimenta el circuito de ${c.codigo}: la tabla de fusibles no lo identifica; requiere el diagrama eléctrico.`);
-      if (c.componente) add(pruebas, `flujo:${c.componente}`, `Seguir el flujo de ${S.COMPONENTES_ELECTRICOS[c.componente].nombre}: alimentación → tierra → cable → componente.`);
+      if (c.componente) add(pruebas, `flujo:${c.componente}`, `Seguir el flujo de ${S.COMPONENTES_ELECTRICOS[c.componente].nombre}: conector → alimentación → tierra → cable → componente.`);
     }
     // Batería y carga
-    const carga = S.evaluarSistemaCarga({ resumen: ctx.obd && ctx.obd.resumen, mediciones: ctx.mediciones, pruebas: ctx.pruebas, sintomas: ctx.sintomas, carro: ctx.carro, variante, historialVoltajes: ctx.historialVoltajes });
+    const carga = S.evaluarSistemaCarga({ resumen: ctx.obd && ctx.obd.resumen, mediciones: (ctx.mediciones || []).filter((m) => S.validarMedicion(m).ok), pruebas: ctx.pruebas, sintomas: ctx.sintomas, carro: ctx.carro, variante, historialVoltajes: ctx.historialVoltajes });
     for (const h of carga.hechos) add(sabe, `carga_hecho:${h.id}`, h.texto);
     for (const h of carga.hipotesis.filter((x) => x.apoyo.length)) {
       add(sospecha, `carga:${h.id}`, `${h.titulo} (${h.certeza}): ${h.apoyo.join("; ")}.`);
       add(pruebas, `carga_sig:${h.id}`, h.siguiente);
-      if (h.nota) add(no_determina, `carga_obd:${h.id}`, `${h.titulo}: ${h.nota}`);
+      if (h.nota) add(no_determina, `carga_obd:${h.id}`, `${h.titulo}: ${h.nota}`, { nivel: "requiere_medicion" });
     }
-    if (carga.hipotesis.some((h) => h.id === "bateria" && h.apoyo.length)) add(no_determina, "bateria_interna", "El estado interno de la batería (necesita un probador de carga o de conductancia).");
+    if (carga.hipotesis.some((h) => h.id === "bateria" && h.apoyo.length)) add(no_determina, "bateria_interna", "El estado interno de la batería (necesita un probador de carga o de conductancia).", { nivel: "requiere_medicion" });
+    // Hipótesis por síntomas e inspección
+    for (const h of S.hipotesisElectricas({ sintomas: ctx.sintomas, variante, inspeccion: ctx.inspeccion, evaluados })) {
+      add(sospecha, h.id, `${h.titulo}. Evidencia: ${h.evidencia.join("; ")}.${h.nota ? " " + h.nota : ""}`, { urgencia: h.urgencia });
+      add(pruebas, `${h.id}_prueba`, h.siguiente);
+      if (h.falta) add(no_determina, `${h.id}_falta`, h.falta);
+    }
     // Causa común
     const cc = []; const Hs = (id, g, t, d, ev, x) => ({ id, gravedad: g, titulo: t, detalle: d, evidencia: ev, ...x });
     reglaCausaComun({ resumen: (ctx.obd && ctx.obd.resumen) || {}, lectura: { codigos: (ctx.obd && ctx.obd.codigos) || [] }, extra: { conexion: ctx.conexion }, H: Hs }, cc);
     for (const h of cc) { add(sospecha, h.id, h.titulo, { causas: h.causas }); add(pruebas, `${h.id}_prueba`, h.prueba); }
     // Siempre
     if (!variante) add(no_determina, "sin_ficha", "No hay una ficha técnica verificada para este carro: los fusibles y relés hay que tomarlos de la etiqueta de la tapa.");
-    add(no_determina, "limite_obd", "El ELM327 no puede revisar físicamente fusibles, relés, tierras ni cables: solo ve lo que reporta la computadora del motor.");
-    return { sabe, sospecha, no_determina, pruebas, fusibles: evaluados, carga };
+    else if (!(variante.circuitos || []).length && !(ctx.circuitos || []).length) add(no_determina, "sin_circuitos", "El cableado de este carro (colores, terminales, conectores, tierras): ScanIA no tiene circuitos documentados con fuente.");
+    add(no_determina, "limite_obd", "El ELM327 no puede revisar físicamente fusibles, relés, tierras ni cables: solo ve lo que reporta la computadora del motor.", { nivel: "requiere_medicion" });
+    return { sabe, sospecha, no_determina, pruebas, fusibles: evaluados, carga, contradicciones };
   };
 
   // ================================================================== casos simulados (para practicar y para las pruebas automáticas)
@@ -6323,10 +6579,10 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       espera: { sabe: ["fusible_ausente:INT-19"], sospecha: [], no_determina: ["por_que_falta:INT-19"], pruebas: ["poner:INT-19"] } },
     fusible_amperaje: { nombre: "Fusible de amperaje incorrecto", descripcion: "En la posición del ventilador del radiador hay un fusible de 30 A.", sintomas: [],
       inspeccion: { fusibles: { "MOT-11": { estado: "bien", metodo: "visual", amperaje_obs: 30 } } }, mediciones: [],
-      espera: { sabe: ["amperaje_distinto:MOT-11"], sospecha: ["falla_tapada:MOT-11"], no_determina: ["doc_aplica:MOT-11"], pruebas: ["amperaje_correcto:MOT-11"] } },
+      espera: { sabe: ["observado:MOT-11"], sospecha: ["amperaje_distinto:MOT-11", "falla_tapada:MOT-11"], no_determina: ["doc_aplica:MOT-11"], pruebas: ["amperaje_correcto:MOT-11"] } },
     rele_defectuoso: { nombre: "Relé defectuoso", descripcion: "El A/C no enfría; con otro relé idéntico el compresor engancha.", sintomas: [],
       inspeccion: { fusibles: { "INT-17": { estado: "bien", metodo: "voltaje" } }, reles: { "MOT-R-AC": { resultado: "mejora" } } }, mediciones: [{ prueba: "rele_intercambio", componente: "MOT-R-AC", valor: "mejora" }],
-      espera: { sabe: ["rele_falla:MOT-R-AC"], sospecha: [], no_determina: ["rele_pos:MOT-R-AC"], pruebas: ["cambiar_rele:MOT-R-AC"] } },
+      espera: { sabe: ["rele_falla:MOT-R-AC"], sospecha: [], no_determina: ["rele_term:MOT-R-AC"], pruebas: ["cambiar_rele:MOT-R-AC"] } },
     tierra_deficiente: { nombre: "Tierra deficiente", descripcion: "Arranque lento; la caída en la tierra del motor es alta.", sintomas: ["arranque_lento"],
       mediciones: [{ prueba: "caida_tierra", circuito: "arranque", valor: 0.9 }, { prueba: "caida_positivo", circuito: "arranque", valor: 0.2 }],
       espera: { sabe: [], sospecha: ["medicion_guia:caida_tierra:", "carga:conexiones"], no_determina: ["sin_spec:caida_tierra"], pruebas: [] } },
@@ -6342,14 +6598,14 @@ MENSAJES DE SEGUIMIENTO (después de la primera respuesta): respondé en texto n
       mediciones: [{ prueba: "continuidad_cable", componente: "ect", valor: "no" }],
       espera: { sabe: ["componente:ect:cable_abierto", "codigo:P0118"], sospecha: ["codigo_circ:P0118"], no_determina: [], pruebas: ["reparar_cable:ect"] } },
     cortocircuito: { nombre: "Cortocircuito", descripcion: "El fusible del vidrio trasero izquierdo se quema cada vez; hay continuidad a tierra con el motor desconectado.", sintomas: ["fusible_se_quema"],
-      inspeccion: { fusibles: { "INT-7": { estado: "quemado", metodo: "continuidad", veces_quemado: 3 } } }, mediciones: [{ prueba: "corto_tierra", componente: "INT-7", valor: "si" }],
+      inspeccion: { fusibles: { "INT-7": { estado: "quemado", metodo: "continuidad", veces_quemado: 3 } } }, mediciones: [{ prueba: "corto_tierra", componente: "INT-7", valor: "si", ohm: 0.3, cargas_desconectadas: true }],
       espera: { sabe: ["se_quema:INT-7", "medicion_fuera:corto_tierra:INT-7"], sospecha: ["corto:INT-7"], no_determina: [], pruebas: ["ubicar_corto:INT-7"] } },
     sensor_sin_alimentacion: { nombre: "Sensor sin alimentación", descripcion: "Códigos P0107 y P0122; el MAP y el TPS no tienen referencia.", sintomas: [],
       obd: { codigos: [{ codigo: "P0107", tipo: "almacenado" }, { codigo: "P0122", tipo: "almacenado" }] }, componentes: { map: { alimentacion: 0.0 }, tps: { alimentacion: 0.0 } },
       mediciones: [{ prueba: "alimentacion_componente", componente: "map", valor: 0.0 }],
       espera: { sabe: ["componente:map:sin_alimentacion", "componente:tps:sin_alimentacion"], sospecha: ["causa_comun_electrica"], no_determina: [], pruebas: ["componente_sig:map"] } },
     resistencia_fuera: { nombre: "Resistencia fuera de especificación", descripcion: "Un sensor mide fuera del valor (EJEMPLO del caso simulado: no es un valor real de ningún carro).", sintomas: [],
-      componentes: { ect: { alimentacion: null, tierra: 0.05, continuidad_senal: "si", resistencia: 95000, resistencia_spec: { min: 2000, max: 3000, fuente: "Valor de EJEMPLO del caso simulado" } } },
+      componentes: { ect: { alimentacion: null, tierra: 0.05, continuidad_senal: "si", conector: "bien", resistencia: 95000, resistencia_spec: { min: 2000, max: 3000, fuente: "Valor de EJEMPLO del caso simulado" } } },
       mediciones: [{ prueba: "resistencia_componente", componente: "ect", valor: 95000, spec: { min: 2000, max: 3000, fuente: "Valor de EJEMPLO del caso simulado" } }],
       espera: { sabe: ["componente:ect:componente", "medicion_fuera:resistencia_componente:ect"], sospecha: [], no_determina: [], pruebas: ["componente_sig:ect"] } },
     conector_defectuoso: { nombre: "Conector defectuoso", descripcion: "La temperatura salta al mover el conector; hay sulfato.", sintomas: ["falla_intermitente"],
@@ -6423,7 +6679,7 @@ Reglas:
       const doc = docs.find((f) => f.numero === num);
       if (!doc) continue;
       const s = { id: doc.id, certeza: e.certeza, cambios: { metodo: "foto_ia" }, texto: "" };
-      if (e.amperaje_visto != null) { s.cambios.amperaje_obs = e.amperaje_visto; s.texto += `Se ve ${e.amperaje_visto} A. `; }
+      if (e.amperaje_visto != null) { s.cambios.amperaje_foto = e.amperaje_visto; s.texto += `La foto sugiere ${e.amperaje_visto} A (miralo en persona). `; }
       if (/cortad|quemad|derretid/.test(e.estado_visual)) { s.cambios.estado = "quemado"; s.texto += "Parece quemado (confirmalo con multímetro). "; }
       else if (e.estado_visual === "sin_dano_visible") { s.cambios.estado = "bien"; s.texto += "Sin daño visible. "; }
       if (e.estado_visual === "sulfato" || e.estado_visual === "flojo_o_fuera_de_lugar") { s.cambios.falso_contacto = true; s.texto += "Sulfato o terminal flojo. "; }
@@ -6432,9 +6688,69 @@ Reglas:
     return out;
   };
 
+  // ================================================================== modelo de circuitos (sin datos inventados)
+  /**
+   * Un circuito documentado es una lista de tramos "desde → hasta", cada uno con el tipo de nodo, su referencia
+   * (por ejemplo el id de un fusible o el nombre del conector), el terminal y el color del cable cuando el documento los da.
+   * Sin fuente no se acepta. ScanIA no trae circuitos del CR-V: se cargan desde el manual de servicio del dueño.
+   */
+  S.TIPOS_NODO = { bateria: "Batería", fusible: "Fusible", rele: "Relé", switch: "Switch", conector: "Conector", empalme: "Empalme", componente: "Componente", computadora: "Computadora (pin)", tierra: "Tierra" };
+  S.validarCircuito = function (c) {
+    const e = [];
+    if (!c || !c.nombre) e.push("falta el nombre");
+    if (!c || !c.fuente || !String(c.fuente).trim()) e.push("falta la fuente (manual, página)");
+    if (!c || !Array.isArray(c.tramos) || !c.tramos.length) e.push("no tiene tramos");
+    for (const [i, t] of ((c && c.tramos) || []).entries()) {
+      for (const lado of ["desde", "hasta"]) {
+        const n = t[lado];
+        if (!n || !S.TIPOS_NODO[n.tipo]) e.push(`tramo ${i + 1}: tipo de nodo inválido en '${lado}'`);
+        else if (!String(n.ref || "").trim()) e.push(`tramo ${i + 1}: falta la referencia en '${lado}'`);
+      }
+    }
+    return e;
+  };
+  const textoNodo = (n) => `${S.TIPOS_NODO[n.tipo] || n.tipo} ${n.ref}${n.terminal ? ` (terminal ${n.terminal})` : ""}`;
+  /** Texto legible de un circuito: "Batería + → [BLK/YEL] → Fusible MOT-13 → …". */
+  S.textoCircuito = function (c) {
+    if (!c || !c.tramos || !c.tramos.length) return "";
+    return [textoNodo(c.tramos[0].desde), ...c.tramos.map((t) => `${t.color ? `[${t.color}] ` : ""}${textoNodo(t.hasta)}`)].join(" → ");
+  };
+
+  /** Qué falta para diagnosticar un relé con multímetro (según lo documentado). */
+  S.faltaParaRele = function (rel, doc) {
+    const d = { ...(rel || {}), ...(doc || {}) };
+    const falta = [];
+    if (!d.posicion && !d.ubicacion_dueno) falta.push("ubicación física");
+    if (!d.terminales || !d.terminales.length) falta.push("numeración de terminales (bobina y contactos)");
+    if (!d.bobina_spec) falta.push("resistencia de la bobina (valor del manual)");
+    if (!d.alimentacion) falta.push("qué terminal del zócalo debe tener voltaje y en qué condición");
+    if (!d.control) falta.push("qué terminal activa la computadora o el switch");
+    if (d.diodo == null) falta.push("si tiene diodo (polaridad)");
+    return falta;
+  };
+
+  /** Avisos si un diagrama no corresponde al carro (mercado, año, motor). */
+  S.compararDiagrama = function (diag, carro, variante) {
+    const av = [];
+    if (!diag) return av;
+    const anio = Number(carro && carro.anio), dAnio = String(diag.anio || "");
+    if (anio && dAnio) {
+      const m = dAnio.match(/(\d{4})(?:\s*[-–]\s*(\d{4}))?/);
+      if (m) { const a = Number(m[1]), b = Number(m[2] || m[1]); if (anio < a || anio > b) av.push(`El diagrama es de ${dAnio} y tu carro es ${anio}.`); }
+    }
+    if (carro && carro.motor && diag.motor && !norm(carro.motor).includes(norm(diag.motor)) && !norm(diag.motor).includes(norm(carro.motor))) av.push(`Motor del diagrama: ${diag.motor}; tu carro: ${carro.motor}.`);
+    if (variante && diag.mercado && variante.mercado) {
+      const dm = norm(diag.mercado), vm = norm(variante.mercado);
+      const claves = ["ee. uu", "eeuu", "usa", "canada", "europa", "japon", "jdm", "latinoamerica", "mexico", "honduras"];
+      const kd = claves.filter((k) => dm.includes(k)), kv = claves.filter((k) => vm.includes(k));
+      if (kd.length && kv.length && !kd.some((k) => kv.includes(k))) av.push(`Mercado del diagrama: ${diag.mercado}; variante en uso: ${variante.mercado.split(".")[0]}.`);
+    }
+    return av;
+  };
+
   // ================================================================== búsqueda
   /** Busca por componente, circuito, fusible o código de falla en la ficha y en los diagramas del dueño. */
-  S.buscarElectrico = function ({ variante, consulta, diagramas = [], ficha }) {
+  S.buscarElectrico = function ({ variante, consulta, diagramas = [], ficha, circuitos = [], carro = null }) {
     const q = norm(consulta).trim();
     if (!q) return [];
     const res = [];
@@ -6453,7 +6769,14 @@ Reglas:
     for (const r of S.relesDe ? S.relesDe(variante) : []) if (norm(`${r.id} ${r.nombre} ${r.nota}`).includes(q)) res.push({ tipo: "rele", id: r.id, titulo: r.nombre, detalle: `${r.caja_nombre}. ${r.nota || ""}` });
     for (const [id, cmp] of Object.entries(S.COMPONENTES_ELECTRICOS)) if (norm(`${id} ${cmp.nombre} ${cmp.tipo}`).includes(q)) res.push({ tipo: "componente", id, titulo: cmp.nombre, detalle: cmp.tipo });
     for (const cm of (ficha && ficha.componentes_motor) || []) if (norm(`${cm.id} ${cm.nombre} ${cm.nota || ""}`).includes(q)) res.push({ tipo: "ficha", id: cm.id, titulo: cm.nombre, detalle: cm.nota || "Componente de la ficha del carro." });
-    for (const d of diagramas) if (norm(`${d.titulo} ${d.tipo} ${(d.etiquetas || []).join(" ")} ${d.notas || ""}`).includes(q)) res.push({ tipo: "diagrama", id: d.id, titulo: d.titulo, detalle: `${d.tipo || "Diagrama"} · ${d.fuente || "sin fuente"}` });
+    for (const d of diagramas) if (norm(`${d.titulo} ${d.tipo} ${(d.etiquetas || []).join(" ")} ${d.notas || ""}`).includes(q)) {
+      const av = S.compararDiagrama(d, carro, variante);
+      res.push({ tipo: "diagrama", id: d.id, titulo: d.titulo, detalle: `${av.length ? "⚠ " + av.join(" ") + " " : ""}${d.tipo || "Diagrama"} · ${d.fuente || "sin fuente"}` });
+    }
+    for (const c of [...((variante && variante.circuitos) || []), ...circuitos]) {
+      const txt = S.textoCircuito(c);
+      if (norm(`${c.nombre} ${c.sistema || ""} ${txt}`).includes(q)) res.push({ tipo: "circuito", id: c.id, titulo: c.nombre, detalle: `${txt} · Fuente: ${c.fuente}` });
+    }
     const vistos = new Set();
     return res.filter((x) => { const k = x.tipo + x.id; if (vistos.has(k)) return false; vistos.add(k); return true; });
   };
@@ -6461,8 +6784,8 @@ Reglas:
   S.TIPOS_DIAGRAMA = ["Alimentación", "Arranque", "Carga", "Encendido", "Inyección", "Sensores", "Tierras", "Fusibles", "Relés", "Comunicación entre módulos", "Otro"];
 
   // ================================================================== informe eléctrico
-  S.informeElectrico = function ({ carro, ficha, variante, inspeccion, mediciones, diagramas, componentes, obd, sintomas, pruebas, simulado }) {
-    const d = S.diagnosticoElectrico({ variante, inspeccion, mediciones, obd, sintomas, pruebas, carro, componentes });
+  S.informeElectrico = function ({ carro, ficha, variante, inspeccion, mediciones, diagramas, componentes, obd, sintomas, pruebas, simulado, circuitos, varianteConfirmada }) {
+    const d = S.diagnosticoElectrico({ variante, inspeccion, mediciones, obd, sintomas, pruebas, carro, componentes, circuitos });
     const docs = S.fusiblesDe ? S.fusiblesDe(variante) : [];
     const ev = d.fusibles;
     const revisados = ev.filter((x) => x.insp && x.insp.estado && x.insp.estado !== "no_se");
@@ -6485,8 +6808,11 @@ Reglas:
       componentes_afectados: [...new Set(d.sabe.concat(d.sospecha).map((x) => (x.id.match(/^componente:([a-z0-9_]+)/) || [])[1]).filter(Boolean))],
       diagramas_consultados: (diagramas || []).map((x) => ({ titulo: x.titulo, tipo: x.tipo, fuente: x.fuente, mercado: x.mercado, anio: x.anio, motor: x.motor, version: x.version })),
       fallas_confirmadas: d.sabe, sospechas: d.sospecha, no_determinado: d.no_determina, pruebas_recomendadas: d.pruebas,
+      contradicciones: d.contradicciones, niveles: S.NIVELES_EVIDENCIA, variante_confirmada: !!varianteConfirmada,
+      circuitos_documentados: [...((variante && variante.circuitos) || []), ...(circuitos || [])].map((c) => ({ nombre: c.nombre, fuente: c.fuente, recorrido: S.textoCircuito(c) })),
       fuentes_tecnicas: ficha ? ficha.fuentes.map((f) => ({ nombre: f.nombre, url: f.url, tipo: f.tipo, uso: f.uso })) : [],
-      limitaciones: ["El ELM327 no revisa fusibles, relés, tierras ni cables: esos datos vienen de tu inspección y tus mediciones.", "Los datos de la ficha no reemplazan la etiqueta de la tapa ni el manual de servicio de tu carro."],
+      limitaciones: ["El ELM327 no revisa fusibles, relés, tierras ni cables: esos datos vienen de tu inspección y tus mediciones.", "Los datos de la ficha no reemplazan la etiqueta de la tapa ni el manual de servicio de tu carro.",
+        "ScanIA no conoce el cableado del carro salvo los circuitos que cargues con su fuente.", varianteConfirmada ? "Variante confirmada por el dueño con la etiqueta de la tapa." : "Variante de la ficha SIN confirmar con la etiqueta de la tapa de este carro."],
     };
   };
 })(typeof window !== "undefined" ? window : globalThis);
@@ -8202,7 +8528,7 @@ Reglas:
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, $$ = U.$$, esc = U.esc, A = () => S.almacen;
-  let panel = "resumen", caja = "interior", ampliado = false, sel = null, practica = null;
+  let panel = "resumen", caja = "interior", ampliado = false, sel = null, practica = null, comoLista = false;
 
   // ------------------------------------------------------------------ datos del carro
   const carroId = () => { const c = U.carro(); return c ? c.id : null; };
@@ -8245,12 +8571,16 @@ Reglas:
       h += `<p class="nota">Ficha técnica: <b>${esc(f.marca)} ${esc(f.modelo)} ${esc(f.anios)}</b> · ${esc(f.sistema_electrico)} · ${esc(f.protocolo)}</p>`;
       if (f.variantes.length > 1) h += `<label>Variante <select id="el-variante">${f.variantes.map((x) => `<option value="${esc(x.id)}"${x.id === (d.variante || f.variantes[0].id) ? " selected" : ""}>${esc(x.nombre)}</option>`).join("")}</select></label>`;
       else h += `<p class="nota">Variante: ${esc(f.variantes[0].nombre)}. ${esc(f.variantes[0].mercado)}</p>`;
+      h += d.variante_confirmada ? `<p><span class="niv confirmado">Variante confirmada por vos con la etiqueta de la tapa</span> <button class="enlace" id="el-desconfirmar">Deshacer</button></p>`
+        : `<p><span class="niv requiere_documentacion">Variante sin confirmar</span> <button class="btn" id="el-confirmar-var">Comparé la etiqueta de MI tapa y coincide</button></p>`;
       h += `<details class="el-avisos"><summary>Antes de usar la ficha (${f.advertencias.length} avisos) y fuentes</summary><ul>${f.advertencias.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
         <h4>Fuentes técnicas</h4><ul>${f.fuentes.map((x) => `<li><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.nombre)}</a> <span class="chip">${esc(x.tipo)}</span><br><span class="nota">${esc(x.uso)}</span></li>`).join("")}</ul></details>`;
     } else if (v) h += `<p class="nota">No hay ficha técnica para este carro: se usa lo que anotaste de la etiqueta de tu tapa.</p>`;
     else h += `<p class="nota">No hay ficha técnica para este carro. Podés armarla con la etiqueta de la tapa de tu caja (en "Fusibles y relés").</p>`;
     $("#el-carro").innerHTML = h;
-    const sv = $("#el-variante"); if (sv) sv.onchange = () => { guardar({ variante: sv.value }); dibujar(); };
+    const sv = $("#el-variante"); if (sv) sv.onchange = () => { guardar({ variante: sv.value, variante_confirmada: false }); dibujar(); };
+    const cv = $("#el-confirmar-var"); if (cv) cv.onclick = () => U.confirmar("¿La etiqueta de tu tapa coincide?", "Confirmalo solo si comparaste la etiqueta de la tapa de TU caja con la que muestra ScanIA (nombres y amperajes). Las posiciones que no coincidan, anotalas con 'Anotar desde la tapa'.", "Sí, coincide", () => { guardar({ variante_confirmada: true }); dibujar(); });
+    const dv = $("#el-desconfirmar"); if (dv) dv.onclick = () => { guardar({ variante_confirmada: false }); dibujar(); };
     const sp = $("#el-salir-practica"); if (sp) sp.onclick = () => { practica = null; dibujar(); };
   }
 
@@ -8260,12 +8590,15 @@ Reglas:
     const a = !practica && E.historial && E.historial.length ? U.analizarAhora() : null;
     const obd = practica ? (practica.caso.obd || {}) : { codigos: E.lectura ? E.lectura.codigos || [] : [], resumen: a ? a.resumen : null };
     const escaneos = !practica && c ? A().escaneos(c.id).slice().reverse() : [];
-    return { variante: variante(), inspeccion: { fusibles: d.fusibles || {}, reles: d.reles || {} }, mediciones: d.mediciones || [], obd, sintomas: d.sintomas || [],
+    const relDoc = d.reles_doc || {};
+    const mediciones = (d.mediciones || []).map((m) => (m.prueba === "rele_bobina" && !m.spec && relDoc[m.componente] && relDoc[m.componente].bobina_spec ? { ...m, spec: relDoc[m.componente].bobina_spec } : m));
+    return { variante: variante(), inspeccion: { fusibles: d.fusibles || {}, reles: d.reles || {}, reles_doc: relDoc }, mediciones, obd, sintomas: d.sintomas || [], circuitos: d.circuitos || [], varianteConfirmada: !!d.variante_confirmada,
       pruebas: !practica && c ? A().pruebas(c.id) : [], carro: c, componentes: d.componentes || {},
       historialVoltajes: escaneos.map((e) => ({ encendido: e.resumen && e.resumen.voltaje != null ? e.resumen.voltaje : null })),
       conexion: !practica && E.fuente && E.fuente.stats ? { reinicios: E.fuente.stats.reinicios || 0, perdidas: (E.fuente.stats.errores || {}).sin_carro || 0 } : null };
   }
-  const lista = (items, vacio) => (items.length ? `<ul>${items.map((x) => `<li>${esc(x.texto)}${x.causas ? `<ul>${x.causas.map((c) => `<li><b>${esc(c.causa)}</b>${c.por_que ? `: ${esc(c.por_que)}` : ""}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>` : `<p class="nota">${esc(vacio)}</p>`);
+  const chipNivel = (n) => (n && S.NIVELES_EVIDENCIA[n] ? `<span class="niv ${esc(n)}" title="${esc(S.NIVELES_EVIDENCIA[n].detalle)}">${esc(S.NIVELES_EVIDENCIA[n].nombre)}</span> ` : "");
+  const lista = (items, vacio) => (items.length ? `<ul>${items.map((x) => `<li>${chipNivel(x.nivel)}${x.urgencia === "detener" ? `<b class="rojo">¡Detener!</b> ` : ""}${esc(x.texto)}${x.causas ? `<ul>${x.causas.map((c) => `<li><b>${esc(c.causa)}</b>${c.por_que ? `: ${esc(c.por_que)}` : ""}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>` : `<p class="nota">${esc(vacio)}</p>`);
 
   // ------------------------------------------------------------------ resumen
   function dibujarResumen() {
@@ -8299,29 +8632,47 @@ Reglas:
     const cajas = v ? v.cajas : [];
     if (!cajas.some((c) => c.id === caja) && caja !== "principales" && caja !== "reles") caja = cajas[0] ? cajas[0].id : "interior";
     const tabs = cajas.map((c) => [c.id, c.nombre]).concat(v ? [["principales", "Fusibles principales"], ["reles", "Relés"]] : []);
-    let h = `<div class="cabecera"><h2>Fusibles y relés</h2><div class="acciones"><button class="btn" id="el-ampliar">${ampliado ? "Reducir" : "Ampliar"}</button><button class="btn" id="el-propio">Anotar desde la tapa</button></div></div>`;
+    let h = `<div class="cabecera"><h2>Fusibles y relés</h2><div class="acciones"><button class="btn" id="el-ampliar">${ampliado ? "Reducir" : "Ampliar"}</button><button class="btn" id="el-lista">${comoLista ? "Ver la caja" : "Ver como lista"}</button><button class="btn" id="el-propio">Anotar desde la tapa</button></div></div>`;
     if (!v) {
       h += `<p class="nota">${esc(S.PENDIENTE_FUSIBLE)}: no hay ficha para este carro. Tocá <b>Anotar desde la tapa</b> y copiá número, amperaje y nombre de cada posición que diga la etiqueta.</p>`;
       $("#el-fusibles").innerHTML = h; enlazarFusibles(); return;
     }
     h += `<div class="el-cajas">${tabs.map(([id, n]) => `<button class="btn${id === caja ? " primario" : ""}" data-caja="${esc(id)}">${esc(n)}</button>`).join("")}</div>`;
-    h += `<p class="nota el-orientativa"><b>Representación orientativa</b>: no es el diagrama del fabricante. Las posiciones están ordenadas por número; en tu caja pueden estar en otro orden. Usá la etiqueta de la tapa para ubicarlas.</p>`;
-    h += `<div class="el-leyenda">${["correcto", "pendiente", "quemado", "amperaje", "desconocida"].map((e) => `<span class="fz ${S.ESTADOS_FUSIBLE[e].color}"></span>${esc(S.ESTADOS_FUSIBLE[e].nombre)}`).join(" ")}</div>`;
+    const cdef0 = cajas.find((c) => c.id === caja);
+    const fisica = !comoLista && cdef0 && cdef0.disposicion;
+    if (fisica) {
+      const fu = (ficha() ? ficha().fuentes : []).find((x) => x.id === cdef0.disposicion.fuente);
+      h += `<p class="nota el-orientativa"><b>Disposición tomada de una foto</b>: ${esc(cdef0.disposicion.aviso)}${fu ? `<br><span class="nota">Fuente: ${esc(fu.nombre)}</span>` : ""}</p>`;
+    } else h += `<p class="nota el-orientativa"><b>Representación orientativa</b>: no es la disposición física. Las posiciones están ordenadas por número; ubicá cada fusible con la etiqueta de la tapa.</p>`;
+    h += `<div class="el-leyenda">${["correcto", "pendiente", "quemado", "quemado_probable", "amperaje", "desconocida"].map((e) => `<span class="fz ${S.ESTADOS_FUSIBLE[e].color}"></span>${esc(S.ESTADOS_FUSIBLE[e].nombre)}`).join(" ")} <span class="fz-marca-l">?</span> fuentes en conflicto · <span class="fz-marca-l">( )</span> opcional</div>`;
     if (caja === "reles") {
       const reles = S.relesDe(v);
-      h += `<div class="el-reles">${reles.map((r) => { const i = (d.reles || {})[r.id] || {};
-        return `<div class="el-rele" data-rele="${esc(r.id)}"><b>${esc(r.nombre)}</b><br><span class="nota">${esc(r.caja_nombre)} · posición ${r.posicion ? esc(r.posicion) : "no documentada"} · ${esc((S.VERIFICACION[r.verificacion] || {}).nombre || "")}</span>
+      h += `<div class="el-reles">${reles.map((r) => { const i = (d.reles || {})[r.id] || {}, falta = S.faltaParaRele(r, (d.reles_doc || {})[r.id]);
+        return `<div class="el-rele" data-rele="${esc(r.id)}"><b>${esc(r.nombre)}</b><br><span class="nota">${esc(r.caja_nombre)} · ${r.posicion ? esc(r.posicion) : esc(r.ubicacion || "posición no documentada")} · ${esc((S.VERIFICACION[r.verificacion] || {}).nombre || "")}</span>
           ${r.nota ? `<p class="nota">${esc(r.nota)}</p>` : ""}${i.resultado ? `<p><span class="chip">${i.resultado === "mejora" ? "Falla confirmada por intercambio" : "Intercambio sin cambio"}</span></p>` : ""}
-          <button class="btn" data-rele-insp="${esc(r.id)}">Anotar prueba</button></div>`; }).join("") || `<p class="nota">No hay relés documentados.</p>`}</div>`;
+          ${falta.length ? `<p class="nota"><span class="niv requiere_documentacion">Requiere documentación técnica</span> Falta: ${esc(falta.join("; "))}.</p>` : `<p><span class="niv confirmado">Documentado por vos</span></p>`}
+          <button class="btn" data-rele-insp="${esc(r.id)}">Anotar prueba / datos del manual</button></div>`; }).join("") || `<p class="nota">No hay relés documentados.</p>`}</div>`;
     } else {
       const fusibles = caja === "principales" ? S.fusiblesDe(v).filter((f) => f.principal) : (cajas.find((c) => c.id === caja) || { fusibles: [] }).fusibles;
       const cdef = cajas.find((c) => c.id === caja);
       if (cdef) h += `<p class="nota">${esc(cdef.ubicacion)}${cdef.tipo_fusible ? ` · ${esc(cdef.tipo_fusible)}` : ""}</p>`;
-      h += `<div class="el-caja${ampliado ? " ampliada" : ""}" style="--cols:${cdef ? cdef.columnas || 5 : 4}">${fusibles.map((f) => {
+      const celda = (f, estilo = "") => {
         const e = S.evaluarFusible(f, (d.fusibles || {})[f.id]);
-        return `<button class="fz-celda ${e.color}${sel === f.id ? " sel" : ""}" data-fus="${esc(f.id)}" title="${esc(`${f.numero} · ${f.amperaje ? f.amperaje + " A · " : ""}${f.nombre} — ${e.nombre_estado}`)}">
-          <span class="fz-num">${f.numero}</span><span class="fz-amp">${f.amperaje ? f.amperaje + "A" : "—"}</span>${ampliado ? `<span class="fz-nom">${esc(f.nombre)}</span>` : ""}${f.verificacion === "conflicto" ? `<span class="fz-marca" title="Fuentes en conflicto">?</span>` : ""}</button>`;
-      }).join("")}</div>`;
+        const amp = f.amperajes_posibles ? f.amperajes_posibles.join("/") + "A" : f.amperaje ? f.amperaje + "A" : "—";
+        return `<button class="fz-celda ${e.color}${sel === f.id ? " sel" : ""}" data-fus="${esc(f.id)}" style="${estilo}" title="${esc(`${f.numero} · ${amp} · ${f.nombre} — ${e.nombre_estado}`)}">
+          <span class="fz-num">${f.numero}</span><span class="fz-amp">${f.opcional ? `(${amp})` : amp}</span>${ampliado || fisica ? `<span class="fz-nom">${esc(ampliado ? f.nombre : f.nombre.split(/[ (]/)[0])}</span>` : ""}${f.verificacion === "conflicto" ? `<span class="fz-marca" title="Fuentes en conflicto">?</span>` : ""}</button>`;
+      };
+      if (fisica) {
+        const disp = cdef.disposicion, rel = cdef.reles || [];
+        const pos = (o) => `grid-row:${o.fila} / span ${o.filas || 1};grid-column:${o.col} / span ${o.cols || 1}`;
+        h += `<div class="el-caja-scroll"><div class="el-caja fisica${ampliado ? " ampliada" : ""}" style="--cols:${disp.columnas};--filas:${disp.filas}">
+          ${fusibles.filter((f) => f.fisica).map((f) => celda(f, pos(f.fisica))).join("")}
+          ${(disp.repuestos || []).map(([fi, co]) => `<div class="fz-celda repuesto" style="grid-row:${fi};grid-column:${co}" title="Casilla de repuesto (la etiqueta no indica amperaje)"><span class="fz-num">R</span><span class="fz-amp">rep.</span></div>`).join("")}
+          ${rel.filter((r) => r.fisica).map((r) => `<button class="fz-celda rele${sel === r.id ? " sel" : ""}" data-rele-insp="${esc(r.id)}" style="${pos(r.fisica)}" title="${esc(r.nombre)}"><span class="fz-num">Relé</span><span class="fz-nom">${esc(r.nombre.replace(/^Relé del? /, "").split(" (")[0])}</span></button>`).join("")}
+        </div></div>`;
+        const sinPos = fusibles.filter((f) => !f.fisica && !f.libre);
+        if (sinPos.length) h += `<p class="nota">Posiciones sin ubicación física conocida: ${sinPos.map((f) => `<button class="enlace" data-fus="${esc(f.id)}">${f.numero}${f.amperaje ? ` (${f.amperaje} A)` : ""}</button>`).join(", ")}.</p>`;
+      } else h += `<div class="el-caja${ampliado ? " ampliada" : ""}" style="--cols:${cdef ? cdef.columnas || 5 : 4}">${fusibles.map((f) => celda(f)).join("")}</div>`;
       const inter = S.detectarIntercambios(v, d.fusibles || {});
       if (inter.length) h += `<div class="advertencia">${inter.map((x) => esc(x.texto)).join("<br>")}</div>`;
     }
@@ -8332,6 +8683,7 @@ Reglas:
   }
   function enlazarFusibles() {
     const a = $("#el-ampliar"); if (a) a.onclick = () => { ampliado = !ampliado; dibujarFusibles(); };
+    const l = $("#el-lista"); if (l) l.onclick = () => { comoLista = !comoLista; dibujarFusibles(); };
     const p = $("#el-propio"); if (p) p.onclick = anotarPropio;
     $$("[data-caja]").forEach((b) => (b.onclick = () => { caja = b.dataset.caja; sel = null; dibujarFusibles(); }));
     $$("[data-fus]").forEach((b) => (b.onclick = () => { sel = b.dataset.fus; dibujarFusibles(); $("#el-detalle-fus").scrollIntoView({ block: "nearest" }); }));
@@ -8352,9 +8704,12 @@ Reglas:
     const e = S.evaluarFusible(f, i);
     const fuentes = (ficha() ? ficha().fuentes : []).filter((x) => (f.fuentes || []).includes(x.id));
     $("#el-detalle-fus").innerHTML = `<div class="el-detalle">
-      <h3>Fusible ${f.numero} · ${f.amperaje ? f.amperaje + " A" : "sin uso"} · ${esc(f.nombre)}</h3>
-      <p><span class="fz ${e.color}"></span> <b>${esc(e.nombre_estado)}</b></p>
-      <dl class="info"><dt>Caja</dt><dd>${esc(f.caja_nombre)}</dd><dt>Circuito protegido</dt><dd>${esc(f.circuito || "—")}</dd>
+      <h3>Fusible ${f.numero} · ${f.amperaje ? f.amperaje + " A" : "sin uso"}${f.amperajes_posibles ? ` <span class="chip">fuentes: ${f.amperajes_posibles.join(" A / ")} A</span>` : ""} · ${esc(f.nombre)}</h3>
+      <p><span class="fz ${e.color}"></span> <b>${esc(e.nombre_estado)}</b> ${chipNivel(e.nivel)}${f.opcional ? `<span class="chip">equipo opcional</span>` : ""}</p>
+      <dl class="info"><dt>Caja</dt><dd>${esc(f.caja_nombre)}</dd>
+        <dt>Ubicación en la caja</dt><dd>${f.fisica ? `Fila ${f.fisica.fila}${f.fisica.filas > 1 ? `–${f.fisica.fila + f.fisica.filas - 1}` : ""}, columna ${f.fisica.col}${f.fisica.cols > 1 ? `–${f.fisica.col + f.fisica.cols - 1}` : ""} <span class="nota">(leída de una foto de la tapa sin confirmar que sea de tu carro)</span>` : "No documentada"}</dd>
+        <dt>Tipo de fusible</dt><dd>${esc(f.tipo || "No documentado: mirá el que tiene puesto (hoja mini, hoja normal, cartucho, etc.)")}</dd>
+        <dt>Circuito protegido</dt><dd>${esc(f.circuito || "—")}</dd>
         <dt>Componentes relacionados</dt><dd>${esc((f.componentes || []).join(", ") || "—")}</dd>
         <dt>Síntomas posibles si falla</dt><dd>${esc((f.sintomas || []).join("; ") || "—")} <span class="nota">(deducidos del circuito; no son del manual)</span></dd>
         <dt>Verificación del dato</dt><dd>${esc((S.VERIFICACION[i.confirmado_tapa ? "dueno" : f.verificacion] || {}).nombre || "")}${f.nota ? `<br><span class="nota">${esc(f.nota)}</span>` : ""}${f.condicion ? `<br><span class="nota">Aplica: ${esc(f.condicion)}</span>` : ""}</dd>
@@ -8363,6 +8718,7 @@ Reglas:
       ${e.acciones.length ? `<div class="bloque"><b>Qué hacer</b><ul>${e.acciones.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       <details><summary>Procedimiento de comprobación</summary><ol>${PROCEDIMIENTO.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></details>
       <h4>Lo que observaste</h4>
+      ${i.amperaje_foto != null ? `<p class="nota">Dato de foto (sin confirmar): ${esc(i.amperaje_foto)} A. No cuenta como observado hasta que lo mires en persona y lo anotes abajo.</p>` : ""}
       <div class="form-carro">
         <label>Estado <select id="fi-estado">${[["", "Sin revisar"], ["bien", "Bien"], ["quemado", "Quemado / abierto"], ["ausente", "No está (falta)"], ["no_se", "No sé"]].map(([k, n]) => `<option value="${k}"${(i.estado || "") === k ? " selected" : ""}>${n}</option>`).join("")}</select></label>
         <label>Cómo lo revisaste <select id="fi-metodo">${Object.entries(S.METODOS_INSPECCION).filter(([k]) => k !== "foto_ia" || i.metodo === "foto_ia").map(([k, n]) => `<option value="${k}"${(i.metodo || "visual") === k ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
@@ -8377,7 +8733,7 @@ Reglas:
     $("#fi-guardar").onclick = () => {
       const fus = { ...(datos().fusibles || {}) };
       const n = (x) => (x === "" || x == null ? null : Number(String(x).replace(",", ".")));
-      fus[id] = { estado: $("#fi-estado").value || undefined, metodo: $("#fi-metodo").value, amperaje_obs: n($("#fi-amp").value.trim()), tipo_obs: $("#fi-tipo").value.trim() || undefined,
+      fus[id] = { ...(fus[id] || {}), estado: $("#fi-estado").value || undefined, metodo: $("#fi-metodo").value, amperaje_obs: n($("#fi-amp").value.trim()), tipo_obs: $("#fi-tipo").value.trim() || undefined,
         veces_quemado: n($("#fi-veces").value.trim()), falso_contacto: $("#fi-contacto").checked, confirmado_tapa: $("#fi-tapa").checked, notas: $("#fi-notas").value.trim() || undefined, fecha: Date.now() / 1000 };
       if (fus[id].amperaje_obs != null && f.amperaje && fus[id].amperaje_obs > f.amperaje) U.toast("Ese fusible es MÁS grande que el documentado. No lo dejes así: el cable se puede calentar antes de que el fusible se queme.", "error");
       guardar({ fusibles: fus }); dibujarFusibles(); U.toast("Guardado.");
@@ -8403,13 +8759,46 @@ Reglas:
   }
   function inspeccionRele(id) {
     const r = S.relesDe(variante()).find((x) => x.id === id) || { nombre: id };
-    const i = (datos().reles || {})[id] || {};
-    U.modal(`<h2>${esc(r.nombre)}</h2><p class="nota">Prueba más simple: cambiarlo por otro relé con el MISMO número de parte (de un circuito que puedas probar). Llave en LOCK para sacar y poner relés.</p>
+    const i = (datos().reles || {})[id] || {}, doc = (datos().reles_doc || {})[id] || {};
+    const falta = S.faltaParaRele(r, doc);
+    const bs = doc.bobina_spec || {};
+    U.modal(`<h2>${esc(r.nombre)}</h2>
+      <p class="nota">${esc(r.caja_nombre || "")}${r.posicion ? ` · ${esc(r.posicion)}` : r.ubicacion ? ` · ${esc(r.ubicacion)}` : ""}</p>
+      ${falta.length ? `<p><span class="niv requiere_documentacion">Requiere documentación técnica</span> Para diagnosticarlo con multímetro falta: ${esc(falta.join("; "))}.</p>` : `<p><span class="niv confirmado">Datos del relé anotados por vos</span></p>`}
+      <h3>Prueba por intercambio</h3>
+      <p class="nota">Cambialo por otro relé con el MISMO número de parte (de un circuito que puedas probar). Llave en LOCK para sacar y poner relés. Si no tenés uno igual, no lo pruebes así.</p>
       <label>Resultado del intercambio <select id="ri-res"><option value="">Sin probar</option><option value="mejora"${i.resultado === "mejora" ? " selected" : ""}>Con el otro relé funciona (el original falla)</option><option value="igual"${i.resultado === "igual" ? " selected" : ""}>Sigue igual</option></select></label>
       <label>Notas <input id="ri-notas" value="${esc(i.notas || "")}"></label>
+      <details${falta.length ? "" : " open"}><summary>Datos del manual de servicio para este relé</summary>
+        <p class="nota">ScanIA no trae terminales, resistencia de bobina ni alimentación de los relés del CR-V. Copialos del manual de TU carro (o del número de parte impreso en el relé). Sin fuente no se guardan.</p>
+        <div class="form-carro">
+          <label>Ubicación (como la ves en tu carro) <input id="rd-ubic" value="${esc(doc.ubicacion_dueno || "")}" placeholder="por ejemplo: caja del motor, columna derecha, 2.º"></label>
+          <label>Terminales (separados por coma) <input id="rd-term" value="${esc((doc.terminales || []).join(", "))}" placeholder="por ejemplo: 1, 2, 3, 4"></label>
+          <label>Bobina entre terminales <input id="rd-btm" value="${esc(doc.bobina_terminales || "")}" placeholder="por ejemplo: 1 y 2"></label>
+          <label>Resistencia de bobina mín. (Ω) <input id="rd-bmin" inputmode="decimal" value="${esc(bs.min ?? "")}"></label>
+          <label>Resistencia de bobina máx. (Ω) <input id="rd-bmax" inputmode="decimal" value="${esc(bs.max ?? "")}"></label>
+          <label>Alimentación (terminal del zócalo y cuándo tiene voltaje) <input id="rd-alim" value="${esc(doc.alimentacion || "")}" placeholder="por ejemplo: terminal 3, voltaje de batería siempre"></label>
+          <label>Control (quién activa la bobina) <input id="rd-ctrl" value="${esc(doc.control || "")}" placeholder="por ejemplo: la computadora pone a tierra el terminal 2"></label>
+          <label>¿Tiene diodo? <select id="rd-diodo"><option value=""${doc.diodo == null ? " selected" : ""}>No sé</option><option value="si"${doc.diodo === true ? " selected" : ""}>Sí (respetar polaridad)</option><option value="no"${doc.diodo === false ? " selected" : ""}>No</option></select></label>
+          <label>Fuente (manual, página o número de parte) <input id="rd-fuente" value="${esc(doc.fuente || "")}" placeholder="Manual de servicio, pág. …"></label>
+        </div></details>
       <div class="acciones"><button class="btn primario" id="ri-ok">Guardar</button><button class="btn" id="ri-no">Cancelar</button></div>`, () => {
       $("#ri-no").onclick = U.cerrarModal;
-      $("#ri-ok").onclick = () => { const rs = { ...(datos().reles || {}) }; rs[id] = { resultado: $("#ri-res").value || undefined, notas: $("#ri-notas").value.trim() || undefined, fecha: Date.now() / 1000 }; guardar({ reles: rs }); U.cerrarModal(); dibujar(); };
+      $("#ri-ok").onclick = () => {
+        const n = (x) => (x.trim() === "" ? null : Number(x.replace(",", ".")));
+        const nuevo = { ubicacion_dueno: $("#rd-ubic").value.trim() || undefined, terminales: $("#rd-term").value.split(",").map((x) => x.trim()).filter(Boolean),
+          bobina_terminales: $("#rd-btm").value.trim() || undefined, alimentacion: $("#rd-alim").value.trim() || undefined, control: $("#rd-ctrl").value.trim() || undefined,
+          diodo: $("#rd-diodo").value === "" ? undefined : $("#rd-diodo").value === "si", fuente: $("#rd-fuente").value.trim() || undefined };
+        const bmin = n($("#rd-bmin").value), bmax = n($("#rd-bmax").value);
+        if (bmin != null || bmax != null) nuevo.bobina_spec = { min: bmin, max: bmax, unidad: "Ω", fuente: nuevo.fuente ? `${nuevo.fuente} (anotado por vos)` : undefined };
+        if (!nuevo.terminales.length) delete nuevo.terminales;
+        const hayDatos = Object.entries(nuevo).some(([k, x]) => k !== "fuente" && x != null);
+        if (hayDatos && !nuevo.fuente) { U.toast("Escribí de dónde salen los datos del relé (manual y página, o número de parte).", "error"); return; }
+        if (nuevo.bobina_spec && bmin != null && bmax != null && bmin > bmax) { U.toast("El mínimo de la bobina es mayor que el máximo.", "error"); return; }
+        const rs = { ...(datos().reles || {}) }; rs[id] = { resultado: $("#ri-res").value || undefined, notas: $("#ri-notas").value.trim() || undefined, fecha: Date.now() / 1000 };
+        const rd = { ...(datos().reles_doc || {}) }; if (hayDatos) rd[id] = { ...nuevo, fecha: Date.now() / 1000 }; else delete rd[id];
+        guardar({ reles: rs, reles_doc: rd }); U.cerrarModal(); dibujar();
+      };
     });
   }
 
@@ -8429,11 +8818,11 @@ Reglas:
     $("#me-lista").innerHTML = (d.mediciones || []).length ? `<div class="tabla-scroll"><table class="tabla-el"><thead><tr><th>Fecha</th><th>Prueba</th><th>Componente</th><th>Valor</th><th>Resultado</th><th></th></tr></thead><tbody>${d.mediciones.map((m, k) => {
       const p = S.pruebaCircuito(m.prueba) || { nombre: m.prueba };
       const e = S.evaluarMedicion(m, m.spec || S.especificacionPara({ variante: v, carro: U.carro(), prueba: m.prueba, componente: m.componente, condicion: m.condicion }));
-      return `<tr><td>${m.fecha ? esc(new Date(m.fecha * 1000).toLocaleDateString("es-HN")) : "—"}</td><td>${esc(p.nombre)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td><span class="ver ${esc(e.veredicto)}">${esc(VER[e.veredicto] || e.veredicto)}</span> ${esc(e.texto)}</td><td><button class="btn-icono" data-me-borrar="${k}" title="Borrar">×</button></td></tr>`;
+      return `<tr><td>${m.fecha ? esc(new Date(m.fecha * 1000).toLocaleDateString("es-HN")) : "—"}</td><td>${esc(p.nombre)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td><span class="ver ${esc(e.veredicto)}">${esc(VER[e.veredicto] || e.veredicto)}</span> ${chipNivel(e.nivel)}${esc(e.texto)}</td><td><button class="btn-icono" data-me-borrar="${k}" title="Borrar">×</button></td></tr>`;
     }).join("")}</tbody></table></div>` : `<p class="nota">Todavía no hay mediciones.</p>`;
     $$("[data-me-borrar]").forEach((b) => (b.onclick = () => { const l = datos().mediciones.slice(); l.splice(Number(b.dataset.meBorrar), 1); guardar({ mediciones: l }); dibujarMediciones(); }));
   }
-  const VER = { dentro: "Dentro", fuera: "Fuera", sin_referencia: "Sin referencia", orientativo_ok: "Bien (orientativo)", orientativo_alto: "Fuera (orientativo)", incompleto: "Incompleto" };
+  const VER = { dentro: "Dentro", fuera: "Fuera", sin_referencia: "Sin referencia", orientativo_ok: "Bien (orientativo)", orientativo_alto: "Fuera (orientativo)", incompleto: "Incompleto", invalida: "Medición inválida", probable: "Probable (sin confirmar)" };
   function valorTexto(m) {
     if (m.entrada != null || m.salida != null) return `${m.entrada ?? "?"} V / ${m.salida ?? "?"} V`;
     if (m.conector) return Object.entries(m.conector).filter(([, v]) => v).map(([k]) => k).join(", ") || "sin fallas";
@@ -8443,9 +8832,12 @@ Reglas:
     const p = S.pruebaCircuito($("#me-prueba").value);
     const v = variante(), c = U.carro();
     const entrada = {
-      continuidad: `<label>¿Hay continuidad? <select id="me-valor"><option value="">Elegí…</option><option value="si">Sí (pita / casi lo mismo que con las puntas juntas)</option><option value="no">No (OL / abierto)</option><option value="dudoso">Dudoso (marca algo pero claramente más)</option></select></label><label>Ohmios (opcional) <input id="me-ohm" inputmode="decimal"></label>`,
+      continuidad: `<label>¿Hay continuidad? <select id="me-valor"><option value="">Elegí…</option><option value="si">Sí (pita / casi lo mismo que con las puntas juntas)</option><option value="no">No (OL / abierto)</option><option value="dudoso">Dudoso (marca algo pero claramente más)</option></select></label><label>Ohmios (opcional; OL si marca abierto) <input id="me-ohm" inputmode="decimal"></label>
+        ${p.id === "corto_tierra" ? `<label class="check"><input type="checkbox" id="me-cargas"> Desconecté TODAS las cargas de ese fusible (bombillos, motores, módulos) antes de medir</label>` : ""}`,
       voltaje_fusible: `<div class="form-carro"><label>Lado 1 (V) <input id="me-ent" inputmode="decimal"></label><label>Lado 2 (V) <input id="me-sal" inputmode="decimal"></label><label>Batería (V) <input id="me-bat" inputmode="decimal" placeholder="12.6"></label></div>`,
-      numero: `<div class="form-carro"><label>Valor medido (${esc(p.unidad || "")}) <input id="me-valor" inputmode="decimal"></label>
+      numero: `<div class="form-carro"><label>Valor medido${p.unidades ? "" : ` (${esc(p.unidad || "")})`} <input id="me-valor" inputmode="decimal"${p.unidad === "Ω" ? ` placeholder="número u OL"` : ""}></label>
+        ${p.unidades ? `<label>Unidad <select id="me-unidad">${p.unidades.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join("")}</select></label>` : ""}
+        ${p.id === "tierra_componente" ? `<label>Voltaje que alimenta ese circuito (V) <input id="me-vcirc" inputmode="decimal" placeholder="batería ~12.6 o referencia ~5"></label>` : ""}
         ${p.guia ? `<label>Circuito <select id="me-circ"><option value="arranque">Arranque</option><option value="carga">Carga</option><option value="otro">Otro</option></select></label>` : ""}
         ${p.condiciones ? `<label>Condición <select id="me-cond"><option value="reposo">Reposo (1 h sin uso)</option><option value="ralenti">Motor en ralentí</option><option value="2000_cargas">Motor a ~2000 rpm con luces y A/C</option></select></label>` : ""}
         ${p.fisica_abierta ? `<label>Batería (V) <input id="me-bat" inputmode="decimal"></label>` : ""}</div>`,
@@ -8473,18 +8865,19 @@ Reglas:
     $("#me-eval").onclick = () => {
       const n = (sel2) => { const x = $(sel2); if (!x || x.value.trim() === "") return null; return Number(x.value.replace(",", ".")); };
       const m = { prueba: p.id, componente: $("#me-comp").value.trim() || undefined, fecha: Date.now() / 1000, unidad: p.unidad };
-      if (p.entrada === "continuidad") { m.valor = $("#me-valor").value; m.ohm = n("#me-ohm"); }
+      const ohmTxt = $("#me-ohm") ? $("#me-ohm").value.trim().toUpperCase() : "";
+      if (p.entrada === "continuidad") { m.valor = $("#me-valor").value; m.ohm = ohmTxt === "OL" ? "OL" : n("#me-ohm"); if ($("#me-cargas")) m.cargas_desconectadas = $("#me-cargas").checked; }
       else if (p.entrada === "voltaje_fusible") { m.entrada = n("#me-ent"); m.salida = n("#me-sal"); m.bateria = n("#me-bat"); }
       else if (p.entrada === "conector") { m.conector = {}; $$("[data-con]").forEach((x) => { if (x.checked) m.conector[x.dataset.con] = true; }); if (!Object.keys(m.conector).length && !$("#me-con-ok").checked) m.conector = {}; else if (!Object.keys(m.conector).length) m.conector = { revisado: false }; }
       else if (p.entrada === "rele") m.valor = $("#me-valor").value;
-      else { m.valor = n("#me-valor"); if ($("#me-circ")) m.circuito = $("#me-circ").value; if ($("#me-cond")) m.condicion = $("#me-cond").value; if ($("#me-bat")) m.bateria = n("#me-bat"); }
+      else { const vt = $("#me-valor").value.trim().toUpperCase(); m.valor = vt === "OL" ? "OL" : n("#me-valor"); if ($("#me-unidad")) { m.unidad_consumo = $("#me-unidad").value; m.unidad = m.unidad_consumo; } if ($("#me-vcirc")) m.voltaje_circuito = n("#me-vcirc"); if ($("#me-circ")) m.circuito = $("#me-circ").value; if ($("#me-cond")) m.condicion = $("#me-cond").value; if ($("#me-bat")) m.bateria = n("#me-bat"); }
       const spec = S.especificacionPara({ variante: v, carro: c, prueba: p.id, componente: m.componente, condicion: m.condicion });
       const e = S.evaluarMedicion(m, spec);
       $("#me-res").innerHTML = `<div class="resultado-g ${e.veredicto === "fuera" || e.veredicto === "orientativo_alto" ? "mal" : e.veredicto === "dentro" || e.veredicto === "orientativo_ok" ? "ok" : "no_concluyente"}">
-        <p><b>6. ${esc(VER[e.veredicto] || e.veredicto)}:</b> ${esc(e.texto)}</p>
+        <p><b>6. ${esc(VER[e.veredicto] || e.veredicto)}:</b> ${chipNivel(e.nivel)}${esc(e.texto)}</p>
         ${e.causas && e.causas.length ? `<p><b>7. Posibles causas:</b></p><ul>${e.causas.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p><b>7. Posibles causas:</b> —</p>`}
         <p><b>8. Siguiente comprobación:</b> ${esc(e.siguiente || "—")}</p></div>`;
-      if (e.veredicto === "incompleto") return;
+      if (e.veredicto === "incompleto" || e.veredicto === "invalida") return;
       guardar({ mediciones: [...(datos().mediciones || []), m] });
       const lst = $("#me-lista"); if (lst) { const r = $("#me-res").innerHTML; dibujarMediciones(); $("#me-prueba").value = p.id; formMedicion(); $("#me-res").innerHTML = r; }
     };
@@ -8572,12 +8965,14 @@ Reglas:
     const d = datos(), f = ficha();
     $("#el-diagramas").innerHTML = `<h2>Diagramas eléctricos</h2>
       <p class="nota">ScanIA no trae diagramas del fabricante y no dibuja diagramas inventados. Subí las páginas de TU manual (foto o PDF) indicando de dónde salen y a qué versión aplican, para no mezclar versiones.</p>
+      <div class="advertencia"><b>Esto es un visor de archivos, no un sistema que conoce los circuitos.</b> ScanIA no lee el contenido de tus diagramas: solo los guarda y los busca por título y etiquetas. Lo que ScanIA sí entiende son los <b>circuitos documentados</b> de abajo (batería → fusible → relé → conector → componente → tierra), y solo los que cargues con su fuente.</div>
       ${f ? `<p class="nota">Documentos de referencia de la ficha: ${f.fuentes.map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.nombre)}</a>`).join(" · ")}</p>` : ""}
       <div class="fila"><input id="di-buscar" placeholder="Buscar por componente, circuito, fusible o código (por ejemplo: P0135, ventilador, 13)"><button class="btn" id="di-buscar-btn">Buscar</button></div>
       <div id="di-res"></div>
-      <h3>Tus diagramas</h3><div id="di-lista">${(d.diagramas || []).length ? (d.diagramas || []).map((x, k) => `<div class="el-diag"><b>${esc(x.titulo)}</b> <span class="chip">${esc(x.tipo)}</span><br>
+      <h3>Tus diagramas</h3><div id="di-lista">${(d.diagramas || []).length ? (d.diagramas || []).map((x, k) => { const av = S.compararDiagrama(x, practica ? practica.carro : U.carro(), variante()); return `<div class="el-diag"><b>${esc(x.titulo)}</b> <span class="chip">${esc(x.tipo)}</span><br>
+        ${av.length ? `<p class="aviso-diag"><span class="niv sospechoso">Puede no ser de tu carro</span> ${esc(av.join(" "))}</p>` : ""}
         <span class="nota">Fuente: ${esc(x.fuente)} · Mercado: ${esc(x.mercado || "—")} · Año: ${esc(x.anio || "—")} · Motor: ${esc(x.motor || "—")} · Versión: ${esc(x.version || "—")}</span>${(x.etiquetas || []).length ? `<br><span class="nota">Etiquetas: ${esc(x.etiquetas.join(", "))}</span>` : ""}
-        <div class="acciones"><button class="btn" data-di-ver="${k}">Ver</button><button class="btn peligro" data-di-borrar="${k}">Borrar</button></div></div>`).join("") : `<p class="nota">Todavía no subiste diagramas.</p>`}</div>
+        <div class="acciones"><button class="btn" data-di-ver="${k}">Ver</button><button class="btn peligro" data-di-borrar="${k}">Borrar</button></div></div>`; }).join("") : `<p class="nota">Todavía no subiste diagramas.</p>`}</div>
       <details class="el-subir"><summary>Subir un diagrama</summary><div class="form-carro">
         <label>Título <input id="di-titulo" placeholder="Por ejemplo: Circuito de carga"></label>
         <label>Tipo <select id="di-tipo">${S.TIPOS_DIAGRAMA.map((t) => `<option>${esc(t)}</option>`).join("")}</select></label>
@@ -8586,9 +8981,11 @@ Reglas:
         <label>Motor <input id="di-motor" placeholder="B20Z"></label><label>Versión <input id="di-version" placeholder="LX / EX"></label>
         <label>Etiquetas (componentes, fusibles, códigos; separadas por coma) <input id="di-etiquetas"></label>
         <label>Archivo (foto o PDF) <input type="file" id="di-archivo" accept="image/*,application/pdf"></label></div>
-        <div class="acciones"><button class="btn primario" id="di-guardar">Guardar diagrama</button></div></details>`;
+        <div class="acciones"><button class="btn primario" id="di-guardar">Guardar diagrama</button></div></details>
+      <div id="di-circuitos"></div>`;
+    dibujarCircuitos();
     const buscar = () => {
-      const res = S.buscarElectrico({ variante: variante(), consulta: $("#di-buscar").value, diagramas: datos().diagramas || [], ficha: f });
+      const res = S.buscarElectrico({ variante: variante(), consulta: $("#di-buscar").value, diagramas: datos().diagramas || [], ficha: f, circuitos: datos().circuitos || [], carro: practica ? practica.carro : U.carro() });
       $("#di-res").innerHTML = res.length ? `<ul class="el-busqueda">${res.map((x) => `<li><span class="chip">${esc(x.tipo)}</span> <b>${esc(x.titulo)}</b><br><span class="nota">${esc(x.detalle || "")}</span></li>`).join("")}</ul>` : `<p class="nota">Sin resultados.</p>`;
     };
     $("#di-buscar-btn").onclick = buscar; $("#di-buscar").onkeydown = (e) => { if (e.key === "Enter") buscar(); };
@@ -8611,6 +9008,38 @@ Reglas:
     $$("[data-di-ver]").forEach((b) => (b.onclick = () => verArchivo(datos().diagramas[Number(b.dataset.diVer)])));
     $$("[data-di-borrar]").forEach((b) => (b.onclick = () => U.confirmar("¿Borrar este diagrama?", "Se borra de este teléfono.", "Borrar", async () => {
       const l = datos().diagramas.slice(); const [x] = l.splice(Number(b.dataset.diBorrar), 1); await S.archivos.borrar(x.archivoId); guardar({ diagramas: l }); dibujarDiagramas(); })));
+  }
+  // Circuitos documentados: el único "conocimiento" del cableado que tiene ScanIA, y solo con fuente.
+  const filaTramo = (k) => `<div class="ci-tramo" data-tramo="${k}"><span class="nota">Tramo ${k + 1}</span>
+      ${["desde", "hasta"].map((l) => `<label>${l === "desde" ? "Desde" : "Hasta"} <select data-t="${l}-tipo">${Object.entries(S.TIPOS_NODO).map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select></label>
+      <label>Referencia <input data-t="${l}-ref" placeholder="${l === "desde" ? "por ejemplo: MOT-13" : "por ejemplo: C101"}"></label><label>Terminal <input data-t="${l}-term" placeholder="opcional"></label>`).join("")}
+      <label>Color del cable <input data-t="color" placeholder="por ejemplo: BLK/YEL"></label></div>`;
+  function dibujarCircuitos() {
+    const d = datos(), v = variante(), cont = $("#di-circuitos"); if (!cont) return;
+    const deFicha = (v && v.circuitos) || [], propios = d.circuitos || [];
+    cont.innerHTML = `<h3>Circuitos documentados</h3>
+      ${!deFicha.length && !propios.length ? `<p class="nota"><span class="niv requiere_documentacion">Requiere documentación técnica</span> Ninguno. ScanIA no conoce el cableado de tu carro: no sabe qué color, terminal o conector lleva cada circuito hasta que lo cargues desde el manual de servicio.</p>` : ""}
+      ${deFicha.length ? `<p class="nota">De la ficha:</p><ul>${deFicha.map((c) => `<li><b>${esc(c.nombre)}</b>: ${esc(S.textoCircuito(c))} <span class="nota">(${esc(c.fuente)})</span></li>`).join("")}</ul>` : ""}
+      ${propios.length ? `<ul class="ci-lista">${propios.map((c, k) => `<li><b>${esc(c.nombre)}</b>${c.sistema ? ` <span class="chip">${esc(c.sistema)}</span>` : ""}<br>${esc(S.textoCircuito(c))}<br><span class="nota">Fuente: ${esc(c.fuente)}</span> <button class="btn-icono" data-ci-borrar="${k}" title="Borrar">×</button></li>`).join("")}</ul>` : ""}
+      <details class="el-subir"><summary>Cargar un circuito desde el manual</summary>
+        <p class="nota">Copiá el recorrido tal como aparece en el diagrama de TU manual, tramo por tramo: de la batería al fusible, al relé, al conector, al componente y a la tierra. Sin fuente no se guarda.</p>
+        <div class="form-carro"><label>Nombre <input id="ci-nombre" placeholder="por ejemplo: Alimentación de la bomba de gasolina"></label>
+          <label>Sistema <select id="ci-sistema">${S.TIPOS_DIAGRAMA.map((t) => `<option>${esc(t)}</option>`).join("")}</select></label>
+          <label>Fuente (obligatoria) <input id="ci-fuente" placeholder="Manual de servicio Honda, sección …, pág. …"></label></div>
+        <div id="ci-tramos">${filaTramo(0)}</div>
+        <div class="acciones"><button class="btn" id="ci-mas">Agregar tramo</button><button class="btn primario" id="ci-guardar">Guardar circuito</button></div></details>`;
+    let nTramos = 1;
+    $("#ci-mas").onclick = () => { $("#ci-tramos").insertAdjacentHTML("beforeend", filaTramo(nTramos++)); };
+    $("#ci-guardar").onclick = () => {
+      const tramos = $$("#ci-tramos .ci-tramo").map((t) => { const g = (k) => t.querySelector(`[data-t="${k}"]`).value.trim();
+        return { desde: { tipo: g("desde-tipo"), ref: g("desde-ref"), terminal: g("desde-term") || undefined }, hasta: { tipo: g("hasta-tipo"), ref: g("hasta-ref"), terminal: g("hasta-term") || undefined }, color: g("color") || undefined }; })
+        .filter((t) => t.desde.ref || t.hasta.ref);
+      const c = { id: "ci-" + Date.now().toString(36), nombre: $("#ci-nombre").value.trim(), sistema: $("#ci-sistema").value, fuente: $("#ci-fuente").value.trim(), tramos, fecha: Date.now() / 1000 };
+      const errores = S.validarCircuito(c);
+      if (errores.length) { U.toast("No se guardó: " + errores.join("; ") + ".", "error"); return; }
+      guardar({ circuitos: [...(datos().circuitos || []), c] }); U.toast("Circuito guardado."); dibujarCircuitos();
+    };
+    $$("[data-ci-borrar]").forEach((b) => (b.onclick = () => U.confirmar("¿Borrar este circuito?", "Se borra de este teléfono.", "Borrar", () => { const l = datos().circuitos.slice(); l.splice(Number(b.dataset.ciBorrar), 1); guardar({ circuitos: l }); dibujarCircuitos(); })));
   }
   const leerB64 = (arch) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("No se pudo leer el archivo.")); r.readAsDataURL(arch); });
   async function verArchivo(x) {
@@ -8691,16 +9120,20 @@ Reglas:
   }
   function generarInforme() {
     const ctx = contexto(), d = datos(), f = ficha();
-    const inf = S.informeElectrico({ carro: ctx.carro, ficha: f, variante: ctx.variante, inspeccion: ctx.inspeccion, mediciones: ctx.mediciones, diagramas: d.diagramas, componentes: ctx.componentes, obd: ctx.obd, sintomas: ctx.sintomas, pruebas: ctx.pruebas, simulado: !!practica || !!(E.fuente && E.fuente.esSimulador) });
-    const li = (l) => (l.length ? `<ul>${l.map((x) => `<li>${esc(typeof x === "string" ? x : x.texto || x.id)}</li>`).join("")}</ul>` : "<p>—</p>");
+    const inf = S.informeElectrico({ carro: ctx.carro, ficha: f, variante: ctx.variante, inspeccion: ctx.inspeccion, mediciones: ctx.mediciones, diagramas: d.diagramas, componentes: ctx.componentes, obd: ctx.obd, sintomas: ctx.sintomas, pruebas: ctx.pruebas, circuitos: ctx.circuitos, varianteConfirmada: ctx.varianteConfirmada, simulado: !!practica || !!(E.fuente && E.fuente.esSimulador) });
+    const nv = (n) => (n && inf.niveles[n] ? `[${inf.niveles[n].nombre}] ` : "");
+    const li = (l) => (l.length ? `<ul>${l.map((x) => `<li>${esc(typeof x === "string" ? x : nv(x.nivel) + (x.urgencia === "detener" ? "¡Detener! " : "") + (x.texto || x.id))}</li>`).join("")}</ul>` : "<p>—</p>");
     const cuerpo = `<h2>Estado general: ${esc(inf.estado_general)}</h2>
-      ${inf.ficha ? `<p>Ficha: ${esc(inf.ficha.nombre)} · ${esc(inf.ficha.variante || "")}</p>` : "<p>Sin ficha técnica verificada.</p>"}
+      ${inf.ficha ? `<p>Ficha: ${esc(inf.ficha.nombre)} · ${esc(inf.ficha.variante || "")} · ${inf.variante_confirmada ? "variante confirmada por el dueño con la etiqueta de la tapa" : "variante SIN confirmar con la etiqueta de la tapa"}</p>` : "<p>Sin ficha técnica verificada.</p>"}
+      <p class="nota">Niveles: ${Object.values(inf.niveles).map((n) => esc(n.nombre)).join(" · ")}. Ninguna prueba física figura como hecha si no la anotaste.</p>
+      ${inf.contradicciones.length ? `<h3>Datos contradictorios (no se usan para concluir)</h3>${li(inf.contradicciones.map((c) => c.texto))}` : ""}
       <h3>Fallas confirmadas</h3>${li(inf.fallas_confirmadas)}<h3>Sospechas</h3>${li(inf.sospechas)}<h3>Lo que no se pudo determinar</h3>${li(inf.no_determinado)}<h3>Pruebas recomendadas</h3>${li(inf.pruebas_recomendadas)}
       <h3>Fusibles revisados (${inf.fusibles_revisados.length})</h3>${inf.fusibles_revisados.length ? `<table class="tabla-el"><tr><th>Fusible</th><th>Estado</th><th>Método</th><th>Amperaje puesto</th></tr>${inf.fusibles_revisados.map((x) => `<tr><td>${esc(x.id)} ${esc(x.nombre || "")}</td><td>${esc(x.estado)}</td><td>${esc(S.METODOS_INSPECCION[x.metodo] || x.metodo || "")}</td><td>${x.amperaje_obs ?? "—"}</td></tr>`).join("")}</table>` : "<p>—</p>"}
       <p>Fusibles incorrectos confirmados: ${esc(inf.fusibles_incorrectos_confirmados.join(", ") || "ninguno")}. Pendientes de revisar: ${inf.fusibles_pendientes.length}.</p>
       <h3>Relés revisados</h3>${li(inf.reles_revisados.map((r) => `${r.id}: ${r.resultado === "mejora" ? "falla (intercambio)" : r.resultado === "igual" ? "sin cambio en el intercambio" : "sin probar"}`))}
-      <h3>Mediciones</h3>${inf.mediciones.length ? `<table class="tabla-el"><tr><th>Prueba</th><th>Componente</th><th>Valor</th><th>Resultado</th></tr>${inf.mediciones.map((m) => `<tr><td>${esc((S.pruebaCircuito(m.prueba) || {}).nombre || m.prueba)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td>${esc(m.evaluacion.texto)}</td></tr>`).join("")}</table>` : "<p>—</p>"}
+      <h3>Mediciones</h3>${inf.mediciones.length ? `<table class="tabla-el"><tr><th>Prueba</th><th>Componente</th><th>Valor</th><th>Resultado</th></tr>${inf.mediciones.map((m) => `<tr><td>${esc((S.pruebaCircuito(m.prueba) || {}).nombre || m.prueba)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td>${esc(nv(m.evaluacion.nivel) + m.evaluacion.texto)}</td></tr>`).join("")}</table>` : "<p>—</p>"}
       <h3>Componentes afectados</h3><p>${esc(inf.componentes_afectados.map((c) => (S.COMPONENTES_ELECTRICOS[c] || {}).nombre || c).join(", ") || "—")}</p>
+      <h3>Circuitos documentados</h3>${li(inf.circuitos_documentados.map((c) => `${c.nombre}: ${c.recorrido} (fuente: ${c.fuente})`))}
       <h3>Diagramas consultados</h3>${li(inf.diagramas_consultados.map((x) => `${x.titulo} (${x.tipo}) · ${x.fuente} · ${[x.mercado, x.anio, x.motor, x.version].filter(Boolean).join(" · ")}`))}
       <h3>Fuentes técnicas</h3>${li(inf.fuentes_tecnicas.map((x) => `${x.nombre} — ${x.url}`))}
       <h3>Limitaciones</h3>${li(inf.limitaciones)}`;
@@ -9134,12 +9567,14 @@ Reglas:
     if (!f) return;
     try {
       const d = JSON.parse(await f.text());
-      U.confirmar("¿Restaurar este respaldo?", "Se juntan los carros, escaneos y diagnósticos del archivo con los que ya tenés. No se borra nada.", "Restaurar", () => {
+      const nArch = (d.archivos || []).filter((a) => a && a.id && a.datos).length;
+      U.confirmar("¿Restaurar este respaldo?", `Se juntan los carros, escaneos y diagnósticos del archivo con los que ya tenés. No se borra nada.${nArch ? ` Trae ${nArch} archivo(s) (fotos o diagramas).` : ""}`, "Restaurar", async () => {
         try {
           const r = S.almacen.importar(d);
-          for (const a of d.archivos || []) if (a && a.id && a.datos) S.archivos.guardar(a);
+          let okA = 0;
+          for (const a of d.archivos || []) if (a && a.id && a.datos) { try { await S.archivos.guardar(a); okA++; } catch (e) { /* se informa abajo */ } }
           E.ajustes = S.almacen.ajustes();
-          U.mensaje($("#msg-respaldo"), `Restaurado: ${r.carros} carro(s), ${r.escaneos} escaneo(s), ${r.diagnosticos} diagnóstico(s), ${r.pruebas} prueba(s).`, "ok");
+          U.mensaje($("#msg-respaldo"), `Restaurado: ${r.carros} carro(s), ${r.escaneos} escaneo(s), ${r.diagnosticos} diagnóstico(s), ${r.pruebas} prueba(s)${nArch ? `, ${okA} de ${nArch} archivo(s)` : ""}.`, okA === nArch ? "ok" : "error");
           U.emit("carro"); U.emit("escaneo"); U.emit("ajustes");
         } catch (e) { U.mensaje($("#msg-respaldo"), e.message, "error"); }
       });
@@ -9243,7 +9678,7 @@ Reglas:
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, $$ = U.$$, esc = U.esc;
-  S.VERSION = "3.0.0";
+  S.VERSION = "3.1.0";
 
   // ================================================================== barra superior y selector de carro
   function dibujarBarra() {

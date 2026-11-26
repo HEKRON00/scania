@@ -575,3 +575,25 @@ details.el-sistemas summary, details.el-seguridad summary, details.el-avisos sum
 .el-ia { border-left: 3px solid var(--azul); padding-left: 10px; margin-top: 8px; font-size: .86rem; }
 .el-busqueda { padding-left: 0; list-style: none; }
 .el-busqueda li { padding: 6px 0; border-bottom: 1px solid var(--borde); }
+
+/* 3.1 · niveles de evidencia, disposición física, circuitos */
+.niv { display: inline-block; font-size: .72rem; font-weight: 600; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--borde); vertical-align: middle; white-space: nowrap; }
+.niv.confirmado { background: rgba(46,180,110,.18); border-color: var(--verde); color: var(--verde); }
+.niv.probable { background: rgba(245,165,36,.16); border-color: var(--ambar); color: var(--ambar); }
+.niv.sospechoso { background: rgba(245,130,36,.16); border-color: #f58224; color: #f58224; }
+.niv.no_verificable { background: rgba(239,77,77,.16); border-color: var(--rojo); color: var(--rojo); }
+.niv.requiere_medicion { background: rgba(80,140,240,.16); border-color: var(--azul); color: var(--azul); }
+.niv.requiere_documentacion { background: var(--fondo); color: var(--tenue); }
+.el-caja-scroll { overflow-x: auto; max-width: 100%; padding-bottom: 4px; }
+.el-caja.fisica { grid-template-columns: repeat(var(--cols), minmax(40px, 1fr)); grid-template-rows: repeat(var(--filas), auto); max-width: 760px; min-width: calc(var(--cols) * 44px); }
+.el-caja.fisica.ampliada { grid-template-columns: repeat(var(--cols), minmax(96px, 1fr)); max-width: none; min-width: calc(var(--cols) * 100px); }
+.el-caja.fisica .fz-nom { font-size: .62rem; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.fz-celda.repuesto { cursor: default; border-style: dashed; opacity: .6; }
+.fz-celda.rele { border-style: double; border-width: 3px; background: rgba(80,140,240,.10); justify-content: center; }
+.fz-marca-l { display: inline-block; font-weight: 700; color: var(--ambar); margin-right: 2px; }
+.ver.invalida { color: var(--rojo); }
+.ver.probable, .ver.sin_referencia, .ver.incompleto { color: var(--ambar); }
+.aviso-diag { margin: 4px 0; font-size: .84rem; }
+.ci-lista li { margin-bottom: 8px; }
+.ci-tramo { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; border: 1px dashed var(--borde); border-radius: 8px; padding: 8px; margin: 6px 0; }
+.ci-tramo > .nota { grid-column: 1 / -1; }

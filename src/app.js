@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, $$ = U.$$, esc = U.esc;
-  S.VERSION = "3.0.0";
+  S.VERSION = "3.1.0";
 
   // ================================================================== barra superior y selector de carro
   function dibujarBarra() {

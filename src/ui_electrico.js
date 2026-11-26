@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const S = window.ScanIA, U = S.ui, E = U.estado, $ = U.$, $$ = U.$$, esc = U.esc, A = () => S.almacen;
-  let panel = "resumen", caja = "interior", ampliado = false, sel = null, practica = null;
+  let panel = "resumen", caja = "interior", ampliado = false, sel = null, practica = null, comoLista = false;
 
   // ------------------------------------------------------------------ datos del carro
   const carroId = () => { const c = U.carro(); return c ? c.id : null; };
@@ -45,12 +45,16 @@
       h += `<p class="nota">Ficha técnica: <b>${esc(f.marca)} ${esc(f.modelo)} ${esc(f.anios)}</b> · ${esc(f.sistema_electrico)} · ${esc(f.protocolo)}</p>`;
       if (f.variantes.length > 1) h += `<label>Variante <select id="el-variante">${f.variantes.map((x) => `<option value="${esc(x.id)}"${x.id === (d.variante || f.variantes[0].id) ? " selected" : ""}>${esc(x.nombre)}</option>`).join("")}</select></label>`;
       else h += `<p class="nota">Variante: ${esc(f.variantes[0].nombre)}. ${esc(f.variantes[0].mercado)}</p>`;
+      h += d.variante_confirmada ? `<p><span class="niv confirmado">Variante confirmada por vos con la etiqueta de la tapa</span> <button class="enlace" id="el-desconfirmar">Deshacer</button></p>`
+        : `<p><span class="niv requiere_documentacion">Variante sin confirmar</span> <button class="btn" id="el-confirmar-var">Comparé la etiqueta de MI tapa y coincide</button></p>`;
       h += `<details class="el-avisos"><summary>Antes de usar la ficha (${f.advertencias.length} avisos) y fuentes</summary><ul>${f.advertencias.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
         <h4>Fuentes técnicas</h4><ul>${f.fuentes.map((x) => `<li><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.nombre)}</a> <span class="chip">${esc(x.tipo)}</span><br><span class="nota">${esc(x.uso)}</span></li>`).join("")}</ul></details>`;
     } else if (v) h += `<p class="nota">No hay ficha técnica para este carro: se usa lo que anotaste de la etiqueta de tu tapa.</p>`;
     else h += `<p class="nota">No hay ficha técnica para este carro. Podés armarla con la etiqueta de la tapa de tu caja (en "Fusibles y relés").</p>`;
     $("#el-carro").innerHTML = h;
-    const sv = $("#el-variante"); if (sv) sv.onchange = () => { guardar({ variante: sv.value }); dibujar(); };
+    const sv = $("#el-variante"); if (sv) sv.onchange = () => { guardar({ variante: sv.value, variante_confirmada: false }); dibujar(); };
+    const cv = $("#el-confirmar-var"); if (cv) cv.onclick = () => U.confirmar("¿La etiqueta de tu tapa coincide?", "Confirmalo solo si comparaste la etiqueta de la tapa de TU caja con la que muestra ScanIA (nombres y amperajes). Las posiciones que no coincidan, anotalas con 'Anotar desde la tapa'.", "Sí, coincide", () => { guardar({ variante_confirmada: true }); dibujar(); });
+    const dv = $("#el-desconfirmar"); if (dv) dv.onclick = () => { guardar({ variante_confirmada: false }); dibujar(); };
     const sp = $("#el-salir-practica"); if (sp) sp.onclick = () => { practica = null; dibujar(); };
   }
 
@@ -60,12 +64,15 @@
     const a = !practica && E.historial && E.historial.length ? U.analizarAhora() : null;
     const obd = practica ? (practica.caso.obd || {}) : { codigos: E.lectura ? E.lectura.codigos || [] : [], resumen: a ? a.resumen : null };
     const escaneos = !practica && c ? A().escaneos(c.id).slice().reverse() : [];
-    return { variante: variante(), inspeccion: { fusibles: d.fusibles || {}, reles: d.reles || {} }, mediciones: d.mediciones || [], obd, sintomas: d.sintomas || [],
+    const relDoc = d.reles_doc || {};
+    const mediciones = (d.mediciones || []).map((m) => (m.prueba === "rele_bobina" && !m.spec && relDoc[m.componente] && relDoc[m.componente].bobina_spec ? { ...m, spec: relDoc[m.componente].bobina_spec } : m));
+    return { variante: variante(), inspeccion: { fusibles: d.fusibles || {}, reles: d.reles || {}, reles_doc: relDoc }, mediciones, obd, sintomas: d.sintomas || [], circuitos: d.circuitos || [], varianteConfirmada: !!d.variante_confirmada,
       pruebas: !practica && c ? A().pruebas(c.id) : [], carro: c, componentes: d.componentes || {},
       historialVoltajes: escaneos.map((e) => ({ encendido: e.resumen && e.resumen.voltaje != null ? e.resumen.voltaje : null })),
       conexion: !practica && E.fuente && E.fuente.stats ? { reinicios: E.fuente.stats.reinicios || 0, perdidas: (E.fuente.stats.errores || {}).sin_carro || 0 } : null };
   }
-  const lista = (items, vacio) => (items.length ? `<ul>${items.map((x) => `<li>${esc(x.texto)}${x.causas ? `<ul>${x.causas.map((c) => `<li><b>${esc(c.causa)}</b>${c.por_que ? `: ${esc(c.por_que)}` : ""}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>` : `<p class="nota">${esc(vacio)}</p>`);
+  const chipNivel = (n) => (n && S.NIVELES_EVIDENCIA[n] ? `<span class="niv ${esc(n)}" title="${esc(S.NIVELES_EVIDENCIA[n].detalle)}">${esc(S.NIVELES_EVIDENCIA[n].nombre)}</span> ` : "");
+  const lista = (items, vacio) => (items.length ? `<ul>${items.map((x) => `<li>${chipNivel(x.nivel)}${x.urgencia === "detener" ? `<b class="rojo">¡Detener!</b> ` : ""}${esc(x.texto)}${x.causas ? `<ul>${x.causas.map((c) => `<li><b>${esc(c.causa)}</b>${c.por_que ? `: ${esc(c.por_que)}` : ""}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>` : `<p class="nota">${esc(vacio)}</p>`);
 
   // ------------------------------------------------------------------ resumen
   function dibujarResumen() {
@@ -99,29 +106,47 @@
     const cajas = v ? v.cajas : [];
     if (!cajas.some((c) => c.id === caja) && caja !== "principales" && caja !== "reles") caja = cajas[0] ? cajas[0].id : "interior";
     const tabs = cajas.map((c) => [c.id, c.nombre]).concat(v ? [["principales", "Fusibles principales"], ["reles", "Relés"]] : []);
-    let h = `<div class="cabecera"><h2>Fusibles y relés</h2><div class="acciones"><button class="btn" id="el-ampliar">${ampliado ? "Reducir" : "Ampliar"}</button><button class="btn" id="el-propio">Anotar desde la tapa</button></div></div>`;
+    let h = `<div class="cabecera"><h2>Fusibles y relés</h2><div class="acciones"><button class="btn" id="el-ampliar">${ampliado ? "Reducir" : "Ampliar"}</button><button class="btn" id="el-lista">${comoLista ? "Ver la caja" : "Ver como lista"}</button><button class="btn" id="el-propio">Anotar desde la tapa</button></div></div>`;
     if (!v) {
       h += `<p class="nota">${esc(S.PENDIENTE_FUSIBLE)}: no hay ficha para este carro. Tocá <b>Anotar desde la tapa</b> y copiá número, amperaje y nombre de cada posición que diga la etiqueta.</p>`;
       $("#el-fusibles").innerHTML = h; enlazarFusibles(); return;
     }
     h += `<div class="el-cajas">${tabs.map(([id, n]) => `<button class="btn${id === caja ? " primario" : ""}" data-caja="${esc(id)}">${esc(n)}</button>`).join("")}</div>`;
-    h += `<p class="nota el-orientativa"><b>Representación orientativa</b>: no es el diagrama del fabricante. Las posiciones están ordenadas por número; en tu caja pueden estar en otro orden. Usá la etiqueta de la tapa para ubicarlas.</p>`;
-    h += `<div class="el-leyenda">${["correcto", "pendiente", "quemado", "amperaje", "desconocida"].map((e) => `<span class="fz ${S.ESTADOS_FUSIBLE[e].color}"></span>${esc(S.ESTADOS_FUSIBLE[e].nombre)}`).join(" ")}</div>`;
+    const cdef0 = cajas.find((c) => c.id === caja);
+    const fisica = !comoLista && cdef0 && cdef0.disposicion;
+    if (fisica) {
+      const fu = (ficha() ? ficha().fuentes : []).find((x) => x.id === cdef0.disposicion.fuente);
+      h += `<p class="nota el-orientativa"><b>Disposición tomada de una foto</b>: ${esc(cdef0.disposicion.aviso)}${fu ? `<br><span class="nota">Fuente: ${esc(fu.nombre)}</span>` : ""}</p>`;
+    } else h += `<p class="nota el-orientativa"><b>Representación orientativa</b>: no es la disposición física. Las posiciones están ordenadas por número; ubicá cada fusible con la etiqueta de la tapa.</p>`;
+    h += `<div class="el-leyenda">${["correcto", "pendiente", "quemado", "quemado_probable", "amperaje", "desconocida"].map((e) => `<span class="fz ${S.ESTADOS_FUSIBLE[e].color}"></span>${esc(S.ESTADOS_FUSIBLE[e].nombre)}`).join(" ")} <span class="fz-marca-l">?</span> fuentes en conflicto · <span class="fz-marca-l">( )</span> opcional</div>`;
     if (caja === "reles") {
       const reles = S.relesDe(v);
-      h += `<div class="el-reles">${reles.map((r) => { const i = (d.reles || {})[r.id] || {};
-        return `<div class="el-rele" data-rele="${esc(r.id)}"><b>${esc(r.nombre)}</b><br><span class="nota">${esc(r.caja_nombre)} · posición ${r.posicion ? esc(r.posicion) : "no documentada"} · ${esc((S.VERIFICACION[r.verificacion] || {}).nombre || "")}</span>
+      h += `<div class="el-reles">${reles.map((r) => { const i = (d.reles || {})[r.id] || {}, falta = S.faltaParaRele(r, (d.reles_doc || {})[r.id]);
+        return `<div class="el-rele" data-rele="${esc(r.id)}"><b>${esc(r.nombre)}</b><br><span class="nota">${esc(r.caja_nombre)} · ${r.posicion ? esc(r.posicion) : esc(r.ubicacion || "posición no documentada")} · ${esc((S.VERIFICACION[r.verificacion] || {}).nombre || "")}</span>
           ${r.nota ? `<p class="nota">${esc(r.nota)}</p>` : ""}${i.resultado ? `<p><span class="chip">${i.resultado === "mejora" ? "Falla confirmada por intercambio" : "Intercambio sin cambio"}</span></p>` : ""}
-          <button class="btn" data-rele-insp="${esc(r.id)}">Anotar prueba</button></div>`; }).join("") || `<p class="nota">No hay relés documentados.</p>`}</div>`;
+          ${falta.length ? `<p class="nota"><span class="niv requiere_documentacion">Requiere documentación técnica</span> Falta: ${esc(falta.join("; "))}.</p>` : `<p><span class="niv confirmado">Documentado por vos</span></p>`}
+          <button class="btn" data-rele-insp="${esc(r.id)}">Anotar prueba / datos del manual</button></div>`; }).join("") || `<p class="nota">No hay relés documentados.</p>`}</div>`;
     } else {
       const fusibles = caja === "principales" ? S.fusiblesDe(v).filter((f) => f.principal) : (cajas.find((c) => c.id === caja) || { fusibles: [] }).fusibles;
       const cdef = cajas.find((c) => c.id === caja);
       if (cdef) h += `<p class="nota">${esc(cdef.ubicacion)}${cdef.tipo_fusible ? ` · ${esc(cdef.tipo_fusible)}` : ""}</p>`;
-      h += `<div class="el-caja${ampliado ? " ampliada" : ""}" style="--cols:${cdef ? cdef.columnas || 5 : 4}">${fusibles.map((f) => {
+      const celda = (f, estilo = "") => {
         const e = S.evaluarFusible(f, (d.fusibles || {})[f.id]);
-        return `<button class="fz-celda ${e.color}${sel === f.id ? " sel" : ""}" data-fus="${esc(f.id)}" title="${esc(`${f.numero} · ${f.amperaje ? f.amperaje + " A · " : ""}${f.nombre} — ${e.nombre_estado}`)}">
-          <span class="fz-num">${f.numero}</span><span class="fz-amp">${f.amperaje ? f.amperaje + "A" : "—"}</span>${ampliado ? `<span class="fz-nom">${esc(f.nombre)}</span>` : ""}${f.verificacion === "conflicto" ? `<span class="fz-marca" title="Fuentes en conflicto">?</span>` : ""}</button>`;
-      }).join("")}</div>`;
+        const amp = f.amperajes_posibles ? f.amperajes_posibles.join("/") + "A" : f.amperaje ? f.amperaje + "A" : "—";
+        return `<button class="fz-celda ${e.color}${sel === f.id ? " sel" : ""}" data-fus="${esc(f.id)}" style="${estilo}" title="${esc(`${f.numero} · ${amp} · ${f.nombre} — ${e.nombre_estado}`)}">
+          <span class="fz-num">${f.numero}</span><span class="fz-amp">${f.opcional ? `(${amp})` : amp}</span>${ampliado || fisica ? `<span class="fz-nom">${esc(ampliado ? f.nombre : f.nombre.split(/[ (]/)[0])}</span>` : ""}${f.verificacion === "conflicto" ? `<span class="fz-marca" title="Fuentes en conflicto">?</span>` : ""}</button>`;
+      };
+      if (fisica) {
+        const disp = cdef.disposicion, rel = cdef.reles || [];
+        const pos = (o) => `grid-row:${o.fila} / span ${o.filas || 1};grid-column:${o.col} / span ${o.cols || 1}`;
+        h += `<div class="el-caja-scroll"><div class="el-caja fisica${ampliado ? " ampliada" : ""}" style="--cols:${disp.columnas};--filas:${disp.filas}">
+          ${fusibles.filter((f) => f.fisica).map((f) => celda(f, pos(f.fisica))).join("")}
+          ${(disp.repuestos || []).map(([fi, co]) => `<div class="fz-celda repuesto" style="grid-row:${fi};grid-column:${co}" title="Casilla de repuesto (la etiqueta no indica amperaje)"><span class="fz-num">R</span><span class="fz-amp">rep.</span></div>`).join("")}
+          ${rel.filter((r) => r.fisica).map((r) => `<button class="fz-celda rele${sel === r.id ? " sel" : ""}" data-rele-insp="${esc(r.id)}" style="${pos(r.fisica)}" title="${esc(r.nombre)}"><span class="fz-num">Relé</span><span class="fz-nom">${esc(r.nombre.replace(/^Relé del? /, "").split(" (")[0])}</span></button>`).join("")}
+        </div></div>`;
+        const sinPos = fusibles.filter((f) => !f.fisica && !f.libre);
+        if (sinPos.length) h += `<p class="nota">Posiciones sin ubicación física conocida: ${sinPos.map((f) => `<button class="enlace" data-fus="${esc(f.id)}">${f.numero}${f.amperaje ? ` (${f.amperaje} A)` : ""}</button>`).join(", ")}.</p>`;
+      } else h += `<div class="el-caja${ampliado ? " ampliada" : ""}" style="--cols:${cdef ? cdef.columnas || 5 : 4}">${fusibles.map((f) => celda(f)).join("")}</div>`;
       const inter = S.detectarIntercambios(v, d.fusibles || {});
       if (inter.length) h += `<div class="advertencia">${inter.map((x) => esc(x.texto)).join("<br>")}</div>`;
     }
@@ -132,6 +157,7 @@
   }
   function enlazarFusibles() {
     const a = $("#el-ampliar"); if (a) a.onclick = () => { ampliado = !ampliado; dibujarFusibles(); };
+    const l = $("#el-lista"); if (l) l.onclick = () => { comoLista = !comoLista; dibujarFusibles(); };
     const p = $("#el-propio"); if (p) p.onclick = anotarPropio;
     $$("[data-caja]").forEach((b) => (b.onclick = () => { caja = b.dataset.caja; sel = null; dibujarFusibles(); }));
     $$("[data-fus]").forEach((b) => (b.onclick = () => { sel = b.dataset.fus; dibujarFusibles(); $("#el-detalle-fus").scrollIntoView({ block: "nearest" }); }));
@@ -152,9 +178,12 @@
     const e = S.evaluarFusible(f, i);
     const fuentes = (ficha() ? ficha().fuentes : []).filter((x) => (f.fuentes || []).includes(x.id));
     $("#el-detalle-fus").innerHTML = `<div class="el-detalle">
-      <h3>Fusible ${f.numero} · ${f.amperaje ? f.amperaje + " A" : "sin uso"} · ${esc(f.nombre)}</h3>
-      <p><span class="fz ${e.color}"></span> <b>${esc(e.nombre_estado)}</b></p>
-      <dl class="info"><dt>Caja</dt><dd>${esc(f.caja_nombre)}</dd><dt>Circuito protegido</dt><dd>${esc(f.circuito || "—")}</dd>
+      <h3>Fusible ${f.numero} · ${f.amperaje ? f.amperaje + " A" : "sin uso"}${f.amperajes_posibles ? ` <span class="chip">fuentes: ${f.amperajes_posibles.join(" A / ")} A</span>` : ""} · ${esc(f.nombre)}</h3>
+      <p><span class="fz ${e.color}"></span> <b>${esc(e.nombre_estado)}</b> ${chipNivel(e.nivel)}${f.opcional ? `<span class="chip">equipo opcional</span>` : ""}</p>
+      <dl class="info"><dt>Caja</dt><dd>${esc(f.caja_nombre)}</dd>
+        <dt>Ubicación en la caja</dt><dd>${f.fisica ? `Fila ${f.fisica.fila}${f.fisica.filas > 1 ? `–${f.fisica.fila + f.fisica.filas - 1}` : ""}, columna ${f.fisica.col}${f.fisica.cols > 1 ? `–${f.fisica.col + f.fisica.cols - 1}` : ""} <span class="nota">(leída de una foto de la tapa sin confirmar que sea de tu carro)</span>` : "No documentada"}</dd>
+        <dt>Tipo de fusible</dt><dd>${esc(f.tipo || "No documentado: mirá el que tiene puesto (hoja mini, hoja normal, cartucho, etc.)")}</dd>
+        <dt>Circuito protegido</dt><dd>${esc(f.circuito || "—")}</dd>
         <dt>Componentes relacionados</dt><dd>${esc((f.componentes || []).join(", ") || "—")}</dd>
         <dt>Síntomas posibles si falla</dt><dd>${esc((f.sintomas || []).join("; ") || "—")} <span class="nota">(deducidos del circuito; no son del manual)</span></dd>
         <dt>Verificación del dato</dt><dd>${esc((S.VERIFICACION[i.confirmado_tapa ? "dueno" : f.verificacion] || {}).nombre || "")}${f.nota ? `<br><span class="nota">${esc(f.nota)}</span>` : ""}${f.condicion ? `<br><span class="nota">Aplica: ${esc(f.condicion)}</span>` : ""}</dd>
@@ -163,6 +192,7 @@
       ${e.acciones.length ? `<div class="bloque"><b>Qué hacer</b><ul>${e.acciones.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       <details><summary>Procedimiento de comprobación</summary><ol>${PROCEDIMIENTO.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></details>
       <h4>Lo que observaste</h4>
+      ${i.amperaje_foto != null ? `<p class="nota">Dato de foto (sin confirmar): ${esc(i.amperaje_foto)} A. No cuenta como observado hasta que lo mires en persona y lo anotes abajo.</p>` : ""}
       <div class="form-carro">
         <label>Estado <select id="fi-estado">${[["", "Sin revisar"], ["bien", "Bien"], ["quemado", "Quemado / abierto"], ["ausente", "No está (falta)"], ["no_se", "No sé"]].map(([k, n]) => `<option value="${k}"${(i.estado || "") === k ? " selected" : ""}>${n}</option>`).join("")}</select></label>
         <label>Cómo lo revisaste <select id="fi-metodo">${Object.entries(S.METODOS_INSPECCION).filter(([k]) => k !== "foto_ia" || i.metodo === "foto_ia").map(([k, n]) => `<option value="${k}"${(i.metodo || "visual") === k ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
@@ -177,7 +207,7 @@
     $("#fi-guardar").onclick = () => {
       const fus = { ...(datos().fusibles || {}) };
       const n = (x) => (x === "" || x == null ? null : Number(String(x).replace(",", ".")));
-      fus[id] = { estado: $("#fi-estado").value || undefined, metodo: $("#fi-metodo").value, amperaje_obs: n($("#fi-amp").value.trim()), tipo_obs: $("#fi-tipo").value.trim() || undefined,
+      fus[id] = { ...(fus[id] || {}), estado: $("#fi-estado").value || undefined, metodo: $("#fi-metodo").value, amperaje_obs: n($("#fi-amp").value.trim()), tipo_obs: $("#fi-tipo").value.trim() || undefined,
         veces_quemado: n($("#fi-veces").value.trim()), falso_contacto: $("#fi-contacto").checked, confirmado_tapa: $("#fi-tapa").checked, notas: $("#fi-notas").value.trim() || undefined, fecha: Date.now() / 1000 };
       if (fus[id].amperaje_obs != null && f.amperaje && fus[id].amperaje_obs > f.amperaje) U.toast("Ese fusible es MÁS grande que el documentado. No lo dejes así: el cable se puede calentar antes de que el fusible se queme.", "error");
       guardar({ fusibles: fus }); dibujarFusibles(); U.toast("Guardado.");
@@ -203,13 +233,46 @@
   }
   function inspeccionRele(id) {
     const r = S.relesDe(variante()).find((x) => x.id === id) || { nombre: id };
-    const i = (datos().reles || {})[id] || {};
-    U.modal(`<h2>${esc(r.nombre)}</h2><p class="nota">Prueba más simple: cambiarlo por otro relé con el MISMO número de parte (de un circuito que puedas probar). Llave en LOCK para sacar y poner relés.</p>
+    const i = (datos().reles || {})[id] || {}, doc = (datos().reles_doc || {})[id] || {};
+    const falta = S.faltaParaRele(r, doc);
+    const bs = doc.bobina_spec || {};
+    U.modal(`<h2>${esc(r.nombre)}</h2>
+      <p class="nota">${esc(r.caja_nombre || "")}${r.posicion ? ` · ${esc(r.posicion)}` : r.ubicacion ? ` · ${esc(r.ubicacion)}` : ""}</p>
+      ${falta.length ? `<p><span class="niv requiere_documentacion">Requiere documentación técnica</span> Para diagnosticarlo con multímetro falta: ${esc(falta.join("; "))}.</p>` : `<p><span class="niv confirmado">Datos del relé anotados por vos</span></p>`}
+      <h3>Prueba por intercambio</h3>
+      <p class="nota">Cambialo por otro relé con el MISMO número de parte (de un circuito que puedas probar). Llave en LOCK para sacar y poner relés. Si no tenés uno igual, no lo pruebes así.</p>
       <label>Resultado del intercambio <select id="ri-res"><option value="">Sin probar</option><option value="mejora"${i.resultado === "mejora" ? " selected" : ""}>Con el otro relé funciona (el original falla)</option><option value="igual"${i.resultado === "igual" ? " selected" : ""}>Sigue igual</option></select></label>
       <label>Notas <input id="ri-notas" value="${esc(i.notas || "")}"></label>
+      <details${falta.length ? "" : " open"}><summary>Datos del manual de servicio para este relé</summary>
+        <p class="nota">ScanIA no trae terminales, resistencia de bobina ni alimentación de los relés del CR-V. Copialos del manual de TU carro (o del número de parte impreso en el relé). Sin fuente no se guardan.</p>
+        <div class="form-carro">
+          <label>Ubicación (como la ves en tu carro) <input id="rd-ubic" value="${esc(doc.ubicacion_dueno || "")}" placeholder="por ejemplo: caja del motor, columna derecha, 2.º"></label>
+          <label>Terminales (separados por coma) <input id="rd-term" value="${esc((doc.terminales || []).join(", "))}" placeholder="por ejemplo: 1, 2, 3, 4"></label>
+          <label>Bobina entre terminales <input id="rd-btm" value="${esc(doc.bobina_terminales || "")}" placeholder="por ejemplo: 1 y 2"></label>
+          <label>Resistencia de bobina mín. (Ω) <input id="rd-bmin" inputmode="decimal" value="${esc(bs.min ?? "")}"></label>
+          <label>Resistencia de bobina máx. (Ω) <input id="rd-bmax" inputmode="decimal" value="${esc(bs.max ?? "")}"></label>
+          <label>Alimentación (terminal del zócalo y cuándo tiene voltaje) <input id="rd-alim" value="${esc(doc.alimentacion || "")}" placeholder="por ejemplo: terminal 3, voltaje de batería siempre"></label>
+          <label>Control (quién activa la bobina) <input id="rd-ctrl" value="${esc(doc.control || "")}" placeholder="por ejemplo: la computadora pone a tierra el terminal 2"></label>
+          <label>¿Tiene diodo? <select id="rd-diodo"><option value=""${doc.diodo == null ? " selected" : ""}>No sé</option><option value="si"${doc.diodo === true ? " selected" : ""}>Sí (respetar polaridad)</option><option value="no"${doc.diodo === false ? " selected" : ""}>No</option></select></label>
+          <label>Fuente (manual, página o número de parte) <input id="rd-fuente" value="${esc(doc.fuente || "")}" placeholder="Manual de servicio, pág. …"></label>
+        </div></details>
       <div class="acciones"><button class="btn primario" id="ri-ok">Guardar</button><button class="btn" id="ri-no">Cancelar</button></div>`, () => {
       $("#ri-no").onclick = U.cerrarModal;
-      $("#ri-ok").onclick = () => { const rs = { ...(datos().reles || {}) }; rs[id] = { resultado: $("#ri-res").value || undefined, notas: $("#ri-notas").value.trim() || undefined, fecha: Date.now() / 1000 }; guardar({ reles: rs }); U.cerrarModal(); dibujar(); };
+      $("#ri-ok").onclick = () => {
+        const n = (x) => (x.trim() === "" ? null : Number(x.replace(",", ".")));
+        const nuevo = { ubicacion_dueno: $("#rd-ubic").value.trim() || undefined, terminales: $("#rd-term").value.split(",").map((x) => x.trim()).filter(Boolean),
+          bobina_terminales: $("#rd-btm").value.trim() || undefined, alimentacion: $("#rd-alim").value.trim() || undefined, control: $("#rd-ctrl").value.trim() || undefined,
+          diodo: $("#rd-diodo").value === "" ? undefined : $("#rd-diodo").value === "si", fuente: $("#rd-fuente").value.trim() || undefined };
+        const bmin = n($("#rd-bmin").value), bmax = n($("#rd-bmax").value);
+        if (bmin != null || bmax != null) nuevo.bobina_spec = { min: bmin, max: bmax, unidad: "Ω", fuente: nuevo.fuente ? `${nuevo.fuente} (anotado por vos)` : undefined };
+        if (!nuevo.terminales.length) delete nuevo.terminales;
+        const hayDatos = Object.entries(nuevo).some(([k, x]) => k !== "fuente" && x != null);
+        if (hayDatos && !nuevo.fuente) { U.toast("Escribí de dónde salen los datos del relé (manual y página, o número de parte).", "error"); return; }
+        if (nuevo.bobina_spec && bmin != null && bmax != null && bmin > bmax) { U.toast("El mínimo de la bobina es mayor que el máximo.", "error"); return; }
+        const rs = { ...(datos().reles || {}) }; rs[id] = { resultado: $("#ri-res").value || undefined, notas: $("#ri-notas").value.trim() || undefined, fecha: Date.now() / 1000 };
+        const rd = { ...(datos().reles_doc || {}) }; if (hayDatos) rd[id] = { ...nuevo, fecha: Date.now() / 1000 }; else delete rd[id];
+        guardar({ reles: rs, reles_doc: rd }); U.cerrarModal(); dibujar();
+      };
     });
   }
 
@@ -229,11 +292,11 @@
     $("#me-lista").innerHTML = (d.mediciones || []).length ? `<div class="tabla-scroll"><table class="tabla-el"><thead><tr><th>Fecha</th><th>Prueba</th><th>Componente</th><th>Valor</th><th>Resultado</th><th></th></tr></thead><tbody>${d.mediciones.map((m, k) => {
       const p = S.pruebaCircuito(m.prueba) || { nombre: m.prueba };
       const e = S.evaluarMedicion(m, m.spec || S.especificacionPara({ variante: v, carro: U.carro(), prueba: m.prueba, componente: m.componente, condicion: m.condicion }));
-      return `<tr><td>${m.fecha ? esc(new Date(m.fecha * 1000).toLocaleDateString("es-HN")) : "—"}</td><td>${esc(p.nombre)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td><span class="ver ${esc(e.veredicto)}">${esc(VER[e.veredicto] || e.veredicto)}</span> ${esc(e.texto)}</td><td><button class="btn-icono" data-me-borrar="${k}" title="Borrar">×</button></td></tr>`;
+      return `<tr><td>${m.fecha ? esc(new Date(m.fecha * 1000).toLocaleDateString("es-HN")) : "—"}</td><td>${esc(p.nombre)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td><span class="ver ${esc(e.veredicto)}">${esc(VER[e.veredicto] || e.veredicto)}</span> ${chipNivel(e.nivel)}${esc(e.texto)}</td><td><button class="btn-icono" data-me-borrar="${k}" title="Borrar">×</button></td></tr>`;
     }).join("")}</tbody></table></div>` : `<p class="nota">Todavía no hay mediciones.</p>`;
     $$("[data-me-borrar]").forEach((b) => (b.onclick = () => { const l = datos().mediciones.slice(); l.splice(Number(b.dataset.meBorrar), 1); guardar({ mediciones: l }); dibujarMediciones(); }));
   }
-  const VER = { dentro: "Dentro", fuera: "Fuera", sin_referencia: "Sin referencia", orientativo_ok: "Bien (orientativo)", orientativo_alto: "Fuera (orientativo)", incompleto: "Incompleto" };
+  const VER = { dentro: "Dentro", fuera: "Fuera", sin_referencia: "Sin referencia", orientativo_ok: "Bien (orientativo)", orientativo_alto: "Fuera (orientativo)", incompleto: "Incompleto", invalida: "Medición inválida", probable: "Probable (sin confirmar)" };
   function valorTexto(m) {
     if (m.entrada != null || m.salida != null) return `${m.entrada ?? "?"} V / ${m.salida ?? "?"} V`;
     if (m.conector) return Object.entries(m.conector).filter(([, v]) => v).map(([k]) => k).join(", ") || "sin fallas";
@@ -243,9 +306,12 @@
     const p = S.pruebaCircuito($("#me-prueba").value);
     const v = variante(), c = U.carro();
     const entrada = {
-      continuidad: `<label>¿Hay continuidad? <select id="me-valor"><option value="">Elegí…</option><option value="si">Sí (pita / casi lo mismo que con las puntas juntas)</option><option value="no">No (OL / abierto)</option><option value="dudoso">Dudoso (marca algo pero claramente más)</option></select></label><label>Ohmios (opcional) <input id="me-ohm" inputmode="decimal"></label>`,
+      continuidad: `<label>¿Hay continuidad? <select id="me-valor"><option value="">Elegí…</option><option value="si">Sí (pita / casi lo mismo que con las puntas juntas)</option><option value="no">No (OL / abierto)</option><option value="dudoso">Dudoso (marca algo pero claramente más)</option></select></label><label>Ohmios (opcional; OL si marca abierto) <input id="me-ohm" inputmode="decimal"></label>
+        ${p.id === "corto_tierra" ? `<label class="check"><input type="checkbox" id="me-cargas"> Desconecté TODAS las cargas de ese fusible (bombillos, motores, módulos) antes de medir</label>` : ""}`,
       voltaje_fusible: `<div class="form-carro"><label>Lado 1 (V) <input id="me-ent" inputmode="decimal"></label><label>Lado 2 (V) <input id="me-sal" inputmode="decimal"></label><label>Batería (V) <input id="me-bat" inputmode="decimal" placeholder="12.6"></label></div>`,
-      numero: `<div class="form-carro"><label>Valor medido (${esc(p.unidad || "")}) <input id="me-valor" inputmode="decimal"></label>
+      numero: `<div class="form-carro"><label>Valor medido${p.unidades ? "" : ` (${esc(p.unidad || "")})`} <input id="me-valor" inputmode="decimal"${p.unidad === "Ω" ? ` placeholder="número u OL"` : ""}></label>
+        ${p.unidades ? `<label>Unidad <select id="me-unidad">${p.unidades.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join("")}</select></label>` : ""}
+        ${p.id === "tierra_componente" ? `<label>Voltaje que alimenta ese circuito (V) <input id="me-vcirc" inputmode="decimal" placeholder="batería ~12.6 o referencia ~5"></label>` : ""}
         ${p.guia ? `<label>Circuito <select id="me-circ"><option value="arranque">Arranque</option><option value="carga">Carga</option><option value="otro">Otro</option></select></label>` : ""}
         ${p.condiciones ? `<label>Condición <select id="me-cond"><option value="reposo">Reposo (1 h sin uso)</option><option value="ralenti">Motor en ralentí</option><option value="2000_cargas">Motor a ~2000 rpm con luces y A/C</option></select></label>` : ""}
         ${p.fisica_abierta ? `<label>Batería (V) <input id="me-bat" inputmode="decimal"></label>` : ""}</div>`,
@@ -273,18 +339,19 @@
     $("#me-eval").onclick = () => {
       const n = (sel2) => { const x = $(sel2); if (!x || x.value.trim() === "") return null; return Number(x.value.replace(",", ".")); };
       const m = { prueba: p.id, componente: $("#me-comp").value.trim() || undefined, fecha: Date.now() / 1000, unidad: p.unidad };
-      if (p.entrada === "continuidad") { m.valor = $("#me-valor").value; m.ohm = n("#me-ohm"); }
+      const ohmTxt = $("#me-ohm") ? $("#me-ohm").value.trim().toUpperCase() : "";
+      if (p.entrada === "continuidad") { m.valor = $("#me-valor").value; m.ohm = ohmTxt === "OL" ? "OL" : n("#me-ohm"); if ($("#me-cargas")) m.cargas_desconectadas = $("#me-cargas").checked; }
       else if (p.entrada === "voltaje_fusible") { m.entrada = n("#me-ent"); m.salida = n("#me-sal"); m.bateria = n("#me-bat"); }
       else if (p.entrada === "conector") { m.conector = {}; $$("[data-con]").forEach((x) => { if (x.checked) m.conector[x.dataset.con] = true; }); if (!Object.keys(m.conector).length && !$("#me-con-ok").checked) m.conector = {}; else if (!Object.keys(m.conector).length) m.conector = { revisado: false }; }
       else if (p.entrada === "rele") m.valor = $("#me-valor").value;
-      else { m.valor = n("#me-valor"); if ($("#me-circ")) m.circuito = $("#me-circ").value; if ($("#me-cond")) m.condicion = $("#me-cond").value; if ($("#me-bat")) m.bateria = n("#me-bat"); }
+      else { const vt = $("#me-valor").value.trim().toUpperCase(); m.valor = vt === "OL" ? "OL" : n("#me-valor"); if ($("#me-unidad")) { m.unidad_consumo = $("#me-unidad").value; m.unidad = m.unidad_consumo; } if ($("#me-vcirc")) m.voltaje_circuito = n("#me-vcirc"); if ($("#me-circ")) m.circuito = $("#me-circ").value; if ($("#me-cond")) m.condicion = $("#me-cond").value; if ($("#me-bat")) m.bateria = n("#me-bat"); }
       const spec = S.especificacionPara({ variante: v, carro: c, prueba: p.id, componente: m.componente, condicion: m.condicion });
       const e = S.evaluarMedicion(m, spec);
       $("#me-res").innerHTML = `<div class="resultado-g ${e.veredicto === "fuera" || e.veredicto === "orientativo_alto" ? "mal" : e.veredicto === "dentro" || e.veredicto === "orientativo_ok" ? "ok" : "no_concluyente"}">
-        <p><b>6. ${esc(VER[e.veredicto] || e.veredicto)}:</b> ${esc(e.texto)}</p>
+        <p><b>6. ${esc(VER[e.veredicto] || e.veredicto)}:</b> ${chipNivel(e.nivel)}${esc(e.texto)}</p>
         ${e.causas && e.causas.length ? `<p><b>7. Posibles causas:</b></p><ul>${e.causas.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p><b>7. Posibles causas:</b> —</p>`}
         <p><b>8. Siguiente comprobación:</b> ${esc(e.siguiente || "—")}</p></div>`;
-      if (e.veredicto === "incompleto") return;
+      if (e.veredicto === "incompleto" || e.veredicto === "invalida") return;
       guardar({ mediciones: [...(datos().mediciones || []), m] });
       const lst = $("#me-lista"); if (lst) { const r = $("#me-res").innerHTML; dibujarMediciones(); $("#me-prueba").value = p.id; formMedicion(); $("#me-res").innerHTML = r; }
     };
@@ -372,12 +439,14 @@
     const d = datos(), f = ficha();
     $("#el-diagramas").innerHTML = `<h2>Diagramas eléctricos</h2>
       <p class="nota">ScanIA no trae diagramas del fabricante y no dibuja diagramas inventados. Subí las páginas de TU manual (foto o PDF) indicando de dónde salen y a qué versión aplican, para no mezclar versiones.</p>
+      <div class="advertencia"><b>Esto es un visor de archivos, no un sistema que conoce los circuitos.</b> ScanIA no lee el contenido de tus diagramas: solo los guarda y los busca por título y etiquetas. Lo que ScanIA sí entiende son los <b>circuitos documentados</b> de abajo (batería → fusible → relé → conector → componente → tierra), y solo los que cargues con su fuente.</div>
       ${f ? `<p class="nota">Documentos de referencia de la ficha: ${f.fuentes.map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.nombre)}</a>`).join(" · ")}</p>` : ""}
       <div class="fila"><input id="di-buscar" placeholder="Buscar por componente, circuito, fusible o código (por ejemplo: P0135, ventilador, 13)"><button class="btn" id="di-buscar-btn">Buscar</button></div>
       <div id="di-res"></div>
-      <h3>Tus diagramas</h3><div id="di-lista">${(d.diagramas || []).length ? (d.diagramas || []).map((x, k) => `<div class="el-diag"><b>${esc(x.titulo)}</b> <span class="chip">${esc(x.tipo)}</span><br>
+      <h3>Tus diagramas</h3><div id="di-lista">${(d.diagramas || []).length ? (d.diagramas || []).map((x, k) => { const av = S.compararDiagrama(x, practica ? practica.carro : U.carro(), variante()); return `<div class="el-diag"><b>${esc(x.titulo)}</b> <span class="chip">${esc(x.tipo)}</span><br>
+        ${av.length ? `<p class="aviso-diag"><span class="niv sospechoso">Puede no ser de tu carro</span> ${esc(av.join(" "))}</p>` : ""}
         <span class="nota">Fuente: ${esc(x.fuente)} · Mercado: ${esc(x.mercado || "—")} · Año: ${esc(x.anio || "—")} · Motor: ${esc(x.motor || "—")} · Versión: ${esc(x.version || "—")}</span>${(x.etiquetas || []).length ? `<br><span class="nota">Etiquetas: ${esc(x.etiquetas.join(", "))}</span>` : ""}
-        <div class="acciones"><button class="btn" data-di-ver="${k}">Ver</button><button class="btn peligro" data-di-borrar="${k}">Borrar</button></div></div>`).join("") : `<p class="nota">Todavía no subiste diagramas.</p>`}</div>
+        <div class="acciones"><button class="btn" data-di-ver="${k}">Ver</button><button class="btn peligro" data-di-borrar="${k}">Borrar</button></div></div>`; }).join("") : `<p class="nota">Todavía no subiste diagramas.</p>`}</div>
       <details class="el-subir"><summary>Subir un diagrama</summary><div class="form-carro">
         <label>Título <input id="di-titulo" placeholder="Por ejemplo: Circuito de carga"></label>
         <label>Tipo <select id="di-tipo">${S.TIPOS_DIAGRAMA.map((t) => `<option>${esc(t)}</option>`).join("")}</select></label>
@@ -386,9 +455,11 @@
         <label>Motor <input id="di-motor" placeholder="B20Z"></label><label>Versión <input id="di-version" placeholder="LX / EX"></label>
         <label>Etiquetas (componentes, fusibles, códigos; separadas por coma) <input id="di-etiquetas"></label>
         <label>Archivo (foto o PDF) <input type="file" id="di-archivo" accept="image/*,application/pdf"></label></div>
-        <div class="acciones"><button class="btn primario" id="di-guardar">Guardar diagrama</button></div></details>`;
+        <div class="acciones"><button class="btn primario" id="di-guardar">Guardar diagrama</button></div></details>
+      <div id="di-circuitos"></div>`;
+    dibujarCircuitos();
     const buscar = () => {
-      const res = S.buscarElectrico({ variante: variante(), consulta: $("#di-buscar").value, diagramas: datos().diagramas || [], ficha: f });
+      const res = S.buscarElectrico({ variante: variante(), consulta: $("#di-buscar").value, diagramas: datos().diagramas || [], ficha: f, circuitos: datos().circuitos || [], carro: practica ? practica.carro : U.carro() });
       $("#di-res").innerHTML = res.length ? `<ul class="el-busqueda">${res.map((x) => `<li><span class="chip">${esc(x.tipo)}</span> <b>${esc(x.titulo)}</b><br><span class="nota">${esc(x.detalle || "")}</span></li>`).join("")}</ul>` : `<p class="nota">Sin resultados.</p>`;
     };
     $("#di-buscar-btn").onclick = buscar; $("#di-buscar").onkeydown = (e) => { if (e.key === "Enter") buscar(); };
@@ -411,6 +482,38 @@
     $$("[data-di-ver]").forEach((b) => (b.onclick = () => verArchivo(datos().diagramas[Number(b.dataset.diVer)])));
     $$("[data-di-borrar]").forEach((b) => (b.onclick = () => U.confirmar("¿Borrar este diagrama?", "Se borra de este teléfono.", "Borrar", async () => {
       const l = datos().diagramas.slice(); const [x] = l.splice(Number(b.dataset.diBorrar), 1); await S.archivos.borrar(x.archivoId); guardar({ diagramas: l }); dibujarDiagramas(); })));
+  }
+  // Circuitos documentados: el único "conocimiento" del cableado que tiene ScanIA, y solo con fuente.
+  const filaTramo = (k) => `<div class="ci-tramo" data-tramo="${k}"><span class="nota">Tramo ${k + 1}</span>
+      ${["desde", "hasta"].map((l) => `<label>${l === "desde" ? "Desde" : "Hasta"} <select data-t="${l}-tipo">${Object.entries(S.TIPOS_NODO).map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select></label>
+      <label>Referencia <input data-t="${l}-ref" placeholder="${l === "desde" ? "por ejemplo: MOT-13" : "por ejemplo: C101"}"></label><label>Terminal <input data-t="${l}-term" placeholder="opcional"></label>`).join("")}
+      <label>Color del cable <input data-t="color" placeholder="por ejemplo: BLK/YEL"></label></div>`;
+  function dibujarCircuitos() {
+    const d = datos(), v = variante(), cont = $("#di-circuitos"); if (!cont) return;
+    const deFicha = (v && v.circuitos) || [], propios = d.circuitos || [];
+    cont.innerHTML = `<h3>Circuitos documentados</h3>
+      ${!deFicha.length && !propios.length ? `<p class="nota"><span class="niv requiere_documentacion">Requiere documentación técnica</span> Ninguno. ScanIA no conoce el cableado de tu carro: no sabe qué color, terminal o conector lleva cada circuito hasta que lo cargues desde el manual de servicio.</p>` : ""}
+      ${deFicha.length ? `<p class="nota">De la ficha:</p><ul>${deFicha.map((c) => `<li><b>${esc(c.nombre)}</b>: ${esc(S.textoCircuito(c))} <span class="nota">(${esc(c.fuente)})</span></li>`).join("")}</ul>` : ""}
+      ${propios.length ? `<ul class="ci-lista">${propios.map((c, k) => `<li><b>${esc(c.nombre)}</b>${c.sistema ? ` <span class="chip">${esc(c.sistema)}</span>` : ""}<br>${esc(S.textoCircuito(c))}<br><span class="nota">Fuente: ${esc(c.fuente)}</span> <button class="btn-icono" data-ci-borrar="${k}" title="Borrar">×</button></li>`).join("")}</ul>` : ""}
+      <details class="el-subir"><summary>Cargar un circuito desde el manual</summary>
+        <p class="nota">Copiá el recorrido tal como aparece en el diagrama de TU manual, tramo por tramo: de la batería al fusible, al relé, al conector, al componente y a la tierra. Sin fuente no se guarda.</p>
+        <div class="form-carro"><label>Nombre <input id="ci-nombre" placeholder="por ejemplo: Alimentación de la bomba de gasolina"></label>
+          <label>Sistema <select id="ci-sistema">${S.TIPOS_DIAGRAMA.map((t) => `<option>${esc(t)}</option>`).join("")}</select></label>
+          <label>Fuente (obligatoria) <input id="ci-fuente" placeholder="Manual de servicio Honda, sección …, pág. …"></label></div>
+        <div id="ci-tramos">${filaTramo(0)}</div>
+        <div class="acciones"><button class="btn" id="ci-mas">Agregar tramo</button><button class="btn primario" id="ci-guardar">Guardar circuito</button></div></details>`;
+    let nTramos = 1;
+    $("#ci-mas").onclick = () => { $("#ci-tramos").insertAdjacentHTML("beforeend", filaTramo(nTramos++)); };
+    $("#ci-guardar").onclick = () => {
+      const tramos = $$("#ci-tramos .ci-tramo").map((t) => { const g = (k) => t.querySelector(`[data-t="${k}"]`).value.trim();
+        return { desde: { tipo: g("desde-tipo"), ref: g("desde-ref"), terminal: g("desde-term") || undefined }, hasta: { tipo: g("hasta-tipo"), ref: g("hasta-ref"), terminal: g("hasta-term") || undefined }, color: g("color") || undefined }; })
+        .filter((t) => t.desde.ref || t.hasta.ref);
+      const c = { id: "ci-" + Date.now().toString(36), nombre: $("#ci-nombre").value.trim(), sistema: $("#ci-sistema").value, fuente: $("#ci-fuente").value.trim(), tramos, fecha: Date.now() / 1000 };
+      const errores = S.validarCircuito(c);
+      if (errores.length) { U.toast("No se guardó: " + errores.join("; ") + ".", "error"); return; }
+      guardar({ circuitos: [...(datos().circuitos || []), c] }); U.toast("Circuito guardado."); dibujarCircuitos();
+    };
+    $$("[data-ci-borrar]").forEach((b) => (b.onclick = () => U.confirmar("¿Borrar este circuito?", "Se borra de este teléfono.", "Borrar", () => { const l = datos().circuitos.slice(); l.splice(Number(b.dataset.ciBorrar), 1); guardar({ circuitos: l }); dibujarCircuitos(); })));
   }
   const leerB64 = (arch) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("No se pudo leer el archivo.")); r.readAsDataURL(arch); });
   async function verArchivo(x) {
@@ -491,16 +594,20 @@
   }
   function generarInforme() {
     const ctx = contexto(), d = datos(), f = ficha();
-    const inf = S.informeElectrico({ carro: ctx.carro, ficha: f, variante: ctx.variante, inspeccion: ctx.inspeccion, mediciones: ctx.mediciones, diagramas: d.diagramas, componentes: ctx.componentes, obd: ctx.obd, sintomas: ctx.sintomas, pruebas: ctx.pruebas, simulado: !!practica || !!(E.fuente && E.fuente.esSimulador) });
-    const li = (l) => (l.length ? `<ul>${l.map((x) => `<li>${esc(typeof x === "string" ? x : x.texto || x.id)}</li>`).join("")}</ul>` : "<p>—</p>");
+    const inf = S.informeElectrico({ carro: ctx.carro, ficha: f, variante: ctx.variante, inspeccion: ctx.inspeccion, mediciones: ctx.mediciones, diagramas: d.diagramas, componentes: ctx.componentes, obd: ctx.obd, sintomas: ctx.sintomas, pruebas: ctx.pruebas, circuitos: ctx.circuitos, varianteConfirmada: ctx.varianteConfirmada, simulado: !!practica || !!(E.fuente && E.fuente.esSimulador) });
+    const nv = (n) => (n && inf.niveles[n] ? `[${inf.niveles[n].nombre}] ` : "");
+    const li = (l) => (l.length ? `<ul>${l.map((x) => `<li>${esc(typeof x === "string" ? x : nv(x.nivel) + (x.urgencia === "detener" ? "¡Detener! " : "") + (x.texto || x.id))}</li>`).join("")}</ul>` : "<p>—</p>");
     const cuerpo = `<h2>Estado general: ${esc(inf.estado_general)}</h2>
-      ${inf.ficha ? `<p>Ficha: ${esc(inf.ficha.nombre)} · ${esc(inf.ficha.variante || "")}</p>` : "<p>Sin ficha técnica verificada.</p>"}
+      ${inf.ficha ? `<p>Ficha: ${esc(inf.ficha.nombre)} · ${esc(inf.ficha.variante || "")} · ${inf.variante_confirmada ? "variante confirmada por el dueño con la etiqueta de la tapa" : "variante SIN confirmar con la etiqueta de la tapa"}</p>` : "<p>Sin ficha técnica verificada.</p>"}
+      <p class="nota">Niveles: ${Object.values(inf.niveles).map((n) => esc(n.nombre)).join(" · ")}. Ninguna prueba física figura como hecha si no la anotaste.</p>
+      ${inf.contradicciones.length ? `<h3>Datos contradictorios (no se usan para concluir)</h3>${li(inf.contradicciones.map((c) => c.texto))}` : ""}
       <h3>Fallas confirmadas</h3>${li(inf.fallas_confirmadas)}<h3>Sospechas</h3>${li(inf.sospechas)}<h3>Lo que no se pudo determinar</h3>${li(inf.no_determinado)}<h3>Pruebas recomendadas</h3>${li(inf.pruebas_recomendadas)}
       <h3>Fusibles revisados (${inf.fusibles_revisados.length})</h3>${inf.fusibles_revisados.length ? `<table class="tabla-el"><tr><th>Fusible</th><th>Estado</th><th>Método</th><th>Amperaje puesto</th></tr>${inf.fusibles_revisados.map((x) => `<tr><td>${esc(x.id)} ${esc(x.nombre || "")}</td><td>${esc(x.estado)}</td><td>${esc(S.METODOS_INSPECCION[x.metodo] || x.metodo || "")}</td><td>${x.amperaje_obs ?? "—"}</td></tr>`).join("")}</table>` : "<p>—</p>"}
       <p>Fusibles incorrectos confirmados: ${esc(inf.fusibles_incorrectos_confirmados.join(", ") || "ninguno")}. Pendientes de revisar: ${inf.fusibles_pendientes.length}.</p>
       <h3>Relés revisados</h3>${li(inf.reles_revisados.map((r) => `${r.id}: ${r.resultado === "mejora" ? "falla (intercambio)" : r.resultado === "igual" ? "sin cambio en el intercambio" : "sin probar"}`))}
-      <h3>Mediciones</h3>${inf.mediciones.length ? `<table class="tabla-el"><tr><th>Prueba</th><th>Componente</th><th>Valor</th><th>Resultado</th></tr>${inf.mediciones.map((m) => `<tr><td>${esc((S.pruebaCircuito(m.prueba) || {}).nombre || m.prueba)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td>${esc(m.evaluacion.texto)}</td></tr>`).join("")}</table>` : "<p>—</p>"}
+      <h3>Mediciones</h3>${inf.mediciones.length ? `<table class="tabla-el"><tr><th>Prueba</th><th>Componente</th><th>Valor</th><th>Resultado</th></tr>${inf.mediciones.map((m) => `<tr><td>${esc((S.pruebaCircuito(m.prueba) || {}).nombre || m.prueba)}</td><td>${esc(m.componente || "")}</td><td>${esc(valorTexto(m))}</td><td>${esc(nv(m.evaluacion.nivel) + m.evaluacion.texto)}</td></tr>`).join("")}</table>` : "<p>—</p>"}
       <h3>Componentes afectados</h3><p>${esc(inf.componentes_afectados.map((c) => (S.COMPONENTES_ELECTRICOS[c] || {}).nombre || c).join(", ") || "—")}</p>
+      <h3>Circuitos documentados</h3>${li(inf.circuitos_documentados.map((c) => `${c.nombre}: ${c.recorrido} (fuente: ${c.fuente})`))}
       <h3>Diagramas consultados</h3>${li(inf.diagramas_consultados.map((x) => `${x.titulo} (${x.tipo}) · ${x.fuente} · ${[x.mercado, x.anio, x.motor, x.version].filter(Boolean).join(" · ")}`))}
       <h3>Fuentes técnicas</h3>${li(inf.fuentes_tecnicas.map((x) => `${x.nombre} — ${x.url}`))}
       <h3>Limitaciones</h3>${li(inf.limitaciones)}`;

@@ -55,12 +55,14 @@
     if (!f) return;
     try {
       const d = JSON.parse(await f.text());
-      U.confirmar("¿Restaurar este respaldo?", "Se juntan los carros, escaneos y diagnósticos del archivo con los que ya tenés. No se borra nada.", "Restaurar", () => {
+      const nArch = (d.archivos || []).filter((a) => a && a.id && a.datos).length;
+      U.confirmar("¿Restaurar este respaldo?", `Se juntan los carros, escaneos y diagnósticos del archivo con los que ya tenés. No se borra nada.${nArch ? ` Trae ${nArch} archivo(s) (fotos o diagramas).` : ""}`, "Restaurar", async () => {
         try {
           const r = S.almacen.importar(d);
-          for (const a of d.archivos || []) if (a && a.id && a.datos) S.archivos.guardar(a);
+          let okA = 0;
+          for (const a of d.archivos || []) if (a && a.id && a.datos) { try { await S.archivos.guardar(a); okA++; } catch (e) { /* se informa abajo */ } }
           E.ajustes = S.almacen.ajustes();
-          U.mensaje($("#msg-respaldo"), `Restaurado: ${r.carros} carro(s), ${r.escaneos} escaneo(s), ${r.diagnosticos} diagnóstico(s), ${r.pruebas} prueba(s).`, "ok");
+          U.mensaje($("#msg-respaldo"), `Restaurado: ${r.carros} carro(s), ${r.escaneos} escaneo(s), ${r.diagnosticos} diagnóstico(s), ${r.pruebas} prueba(s)${nArch ? `, ${okA} de ${nArch} archivo(s)` : ""}.`, okA === nArch ? "ok" : "error");
           U.emit("carro"); U.emit("escaneo"); U.emit("ajustes");
         } catch (e) { U.mensaje($("#msg-respaldo"), e.message, "error"); }
       });
